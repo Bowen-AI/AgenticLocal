@@ -144,6 +144,42 @@ def voice_page_html(version: str) -> str:
       overflow: auto;
       padding: 12px 16px;
     }}
+    .registry {{
+      display: grid;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+    }}
+    .registry-title {{
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }}
+    .rule-list, .workflow-list {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .rule-item {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      min-height: 34px;
+      padding: 0 10px;
+      color: var(--ink);
+      background: #fff;
+    }}
+    button.workflow {{
+      min-height: 34px;
+      padding: 0 10px;
+    }}
+    button.workflow.active {{
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 700;
+    }}
     .step {{
       border-left: 3px solid var(--line);
       padding: 8px 0 8px 10px;
@@ -196,6 +232,16 @@ def voice_page_html(version: str) -> str:
       <header>
         <h2>Tool timeline</h2>
       </header>
+      <div class="registry">
+        <div>
+          <div class="registry-title">Rules</div>
+          <div id="rules" class="rule-list"></div>
+        </div>
+        <div>
+          <div class="registry-title">Workflows</div>
+          <div id="workflows" class="workflow-list"></div>
+        </div>
+      </div>
       <div id="timeline" class="timeline"></div>
     </section>
   </main>
@@ -208,12 +254,15 @@ def voice_page_html(version: str) -> str:
     const statusEl = document.getElementById("status");
     const logEl = document.getElementById("log");
     const timelineEl = document.getElementById("timeline");
+    const rulesEl = document.getElementById("rules");
+    const workflowsEl = document.getElementById("workflows");
     const form = document.getElementById("textForm");
     const textInput = document.getElementById("textInput");
 
     let sessionId = null;
     let recognition = null;
     let listening = false;
+    let currentWorkflow = null;
 
     function setStatus(text) {{
       statusEl.textContent = text;
@@ -260,6 +309,74 @@ def voice_page_html(version: str) -> str:
       }}
     }}
 
+    function renderRules(rules) {{
+      rulesEl.textContent = "";
+      for (const rule of rules || []) {{
+        const label = document.createElement("label");
+        label.className = "rule-item";
+        label.title = rule.description || rule.key;
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = Boolean(rule.enabled);
+        checkbox.addEventListener("change", async () => {{
+          await fetch("/rules/toggle", {{
+            method: "POST",
+            headers: {{"Content-Type": "application/json"}},
+            body: JSON.stringify({{
+              rule: rule.key,
+              enabled: checkbox.checked,
+              scope_type: "global",
+              session_id: sessionId
+            }})
+          }});
+          loadRegistries().catch(error => setStatus("Registry error: " + error.message));
+        }});
+        label.append(checkbox, document.createTextNode(rule.label || rule.key));
+        rulesEl.append(label);
+      }}
+    }}
+
+    function renderWorkflows(workflows) {{
+      workflowsEl.textContent = "";
+      for (const workflow of workflows || []) {{
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "workflow" + (currentWorkflow === workflow.key ? " active" : "");
+        button.textContent = workflow.command || ("/" + workflow.key);
+        button.title = workflow.description || workflow.key;
+        button.addEventListener("click", async () => {{
+          const response = await fetch("/workflows/start", {{
+            method: "POST",
+            headers: {{"Content-Type": "application/json"}},
+            body: JSON.stringify({{workflow: workflow.key, session_id: sessionId}})
+          }});
+          const data = await response.json();
+          if (!response.ok) {{
+            setStatus(data.message || data.error || "Workflow unavailable");
+            return;
+          }}
+          currentWorkflow = workflow.key;
+          sessionId = data.session_id || sessionId;
+          renderWorkflows(workflows);
+          setStatus("Workflow active: " + (workflow.command || workflow.key));
+        }});
+        workflowsEl.append(button);
+      }}
+    }}
+
+    async function loadRegistries() {{
+      const rulesResponse = await fetch("/registry/rules" + (sessionId ? "?session_id=" + encodeURIComponent(sessionId) : ""));
+      const workflowResponse = await fetch("/registry/workflows");
+      if (rulesResponse.ok) {{
+        const data = await rulesResponse.json();
+        renderRules(data.rules);
+      }}
+      if (workflowResponse.ok) {{
+        const data = await workflowResponse.json();
+        renderWorkflows(data.workflows);
+      }}
+    }}
+
     function speak(text) {{
       if (!speakCheckbox.checked || !("speechSynthesis" in window)) {{
         return;
@@ -276,7 +393,7 @@ def voice_page_html(version: str) -> str:
       const response = await fetch("/chat", {{
         method: "POST",
         headers: {{"Content-Type": "application/json"}},
-        body: JSON.stringify({{message, session_id: sessionId}})
+        body: JSON.stringify({{message, session_id: sessionId, workflow: currentWorkflow}})
       }});
       if (!response.ok) {{
         const errorText = await response.text();
@@ -284,6 +401,7 @@ def voice_page_html(version: str) -> str:
       }}
       const data = await response.json();
       sessionId = data.session_id;
+      loadRegistries().catch(error => setStatus("Registry error: " + error.message));
       appendMessage("assistant", data.final_answer);
       renderSteps(data.steps);
       speak(data.final_answer);
@@ -332,10 +450,12 @@ def voice_page_html(version: str) -> str:
     }});
     clearButton.addEventListener("click", () => {{
       sessionId = null;
+      currentWorkflow = null;
       logEl.textContent = "";
       timelineEl.textContent = "";
       window.speechSynthesis && window.speechSynthesis.cancel();
       setStatus("Voice mode is ready.");
+      loadRegistries().catch(error => setStatus("Registry error: " + error.message));
     }});
     form.addEventListener("submit", event => {{
       event.preventDefault();
@@ -348,8 +468,8 @@ def voice_page_html(version: str) -> str:
     }});
 
     configureRecognition();
+    loadRegistries().catch(error => setStatus("Registry error: " + error.message));
   </script>
 </body>
 </html>
 """
-

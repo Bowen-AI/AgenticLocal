@@ -122,11 +122,13 @@ Useful workflows:
 - GET `/events` for event snapshots.
 - GET `/events?follow=1&timeout=30` for SSE streaming.
 - GET `/registry/ui` to see component mappings.
+- GET `/registry/rules` and `/registry/workflows` for toggles and presets.
+- GET `/registry/models` to discover provider/model selection requirements.
 - GET `/voice` for the browser speech page.
 
-## 7. Tool Timeline And UI Registry
+## 7. Rules, Workflows, And UI Registry
 
-The storage layer persists tool and UI registry metadata.
+The storage layer persists tool, UI, rule, and workflow registry metadata.
 
 Examples:
 
@@ -135,10 +137,12 @@ Examples:
 - `remember` and `recall` map to `memory_view`.
 - Network searches map to search/news result components.
 - Approval-required events can map to an approval modal.
+- `max_effort`, `academic`, `concise`, and `safe_writes` are toggleable rules.
+- `/loop` and `/search` are workflow presets.
 
 This lets a frontend render the same runtime events as a timeline, table
-preview, file browser, memory view, or modal without hardcoding every tool in
-the page.
+preview, file browser, memory view, modal, rule toggle, or workflow button
+without hardcoding every tool in the page.
 
 ## 8. Voice Companion Around The Same Runtime
 
@@ -163,8 +167,10 @@ The model interface is provider-neutral.
 Current paths:
 
 - `rule`: deterministic local planner for tests and demos.
-- `ollama`: local model adapter.
+- `ollama`: local model adapter selected with an explicit model name.
+- `openai`: OpenAI chat-completions-compatible endpoint.
 - `openai-compatible`: API-key-backed compatible endpoint.
+- `gemini`: Gemini or Google-compatible OpenAI-style endpoint with configured `api_base`.
 - `localai`: LocalAI-compatible endpoint.
 
 Example Ollama run:
@@ -174,6 +180,14 @@ python3 -m agentic_loop chat \
   --provider ollama \
   --model gemma4:e4b \
   --enable-network-tools
+```
+
+Served runs can choose the provider/model per request:
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello","model":{"provider":"ollama","name":"your-local-model"}}'
 ```
 
 ## 10. Research Product Direction

@@ -74,6 +74,7 @@ Use this local backend shape as the product spine:
 
 ```text
 chat/session service
+-> model selection interface
 -> model adapter
 -> agent loop
 -> policy
@@ -87,12 +88,35 @@ Then add model adapters:
 ```text
 OpenAI adapter       # best hosted model/Agents SDK path
 Ollama adapter       # local-first path
+Gemini/OpenAI-compatible adapter # hosted compatible API path
 LocalAI adapter      # OpenAI-compatible local server path
 Voice adapter        # audio in/out around the same text agent loop
 ```
 
 This keeps the product independent from any one model provider while still
 letting us use OpenAI's agent framework where it helps.
+
+The service may start with a default provider, but it must not lock the whole
+server to one model. Clients can select provider/model per `/run`, per `/chat`,
+or per session through `/models/select`; UI can discover choices from
+`GET /registry/models`.
+
+Runtime model selection is intentionally an interface contract, not a UI
+decision. Requests can send:
+
+```json
+{
+  "model": {
+    "provider": "ollama",
+    "name": "your-local-model",
+    "api_base": null,
+    "api_key": null
+  }
+}
+```
+
+The `rule` provider is the only no-model default. Every external/local model
+provider requires the caller to choose the model explicitly.
 
 Important caveat: not every local Ollama model supports native tool calling.
 For example, `gemma3:270m` works as a chat model here, but Ollama rejects tool
@@ -119,7 +143,9 @@ agentic-loop serve    # local HTTP service
 GET /voice            # embedded browser voice mode
 POST /chat            # stateful session chat
 POST /run             # one-shot run
+POST /models/select   # session model/provider selection
 GET /tools            # tool schemas
+GET /registry/models  # model/provider registry
 GET /health           # service health
 ```
 
@@ -137,6 +163,9 @@ SQLite .agentic/agentic.db
   -> workflow events/traces
   -> tool registry metadata
   -> UI registry metadata
+  -> rule registry metadata and rule settings
+  -> workflow registry metadata
+  -> optional future model profile registry
 
 Workspace policy
   -> configured read roots
@@ -154,6 +183,7 @@ Next model work should be adapter-focused, not a rewrite:
 agentic_loop/providers/openai_compatible.py
 agentic_loop/providers/localai.py
 agentic_loop/ollama_model.py
+agentic_loop/model_selection.py
 ```
 
 ## Sources

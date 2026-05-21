@@ -42,7 +42,7 @@
           <h1 id="hero-title">AgenticLocal</h1>
           <p class="lede">
             A small, inspectable agent loop with tools, workspace policy, durable
-            SQLite state, streaming events, voice, and swappable model adapters.
+            SQLite state, streaming events, voice, and runtime-selectable model adapters.
           </p>
           <div class="hero-actions" aria-label="Primary links">
             <a class="button primary" href="install.html">Install</a>
@@ -100,9 +100,10 @@
             </p>
             <ul class="check-list">
               <li>Named read and write roots with path escape protection.</li>
-              <li>Durable sessions, memory, traces, and registry metadata.</li>
+              <li>Durable sessions, memory, traces, rules, workflows, and registry metadata.</li>
               <li>Tool-call loop guard for repeated identical successful calls.</li>
-              <li>Rule, Ollama, OpenAI-compatible, and LocalAI adapter paths.</li>
+              <li>Rule, Ollama, OpenAI-compatible, Gemini-compatible, and LocalAI adapter paths.</li>
+              <li>Provider/model selection per run, chat request, or session.</li>
             </ul>
           </div>
         </div>

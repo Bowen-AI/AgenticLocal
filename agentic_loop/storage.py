@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .memory import MemoryRecord
+from .rules import default_rule_metadata, default_workflow_metadata
 from .types import AgentStep, Message
 
 
@@ -111,6 +112,39 @@ class SQLiteStore:
                     event_type TEXT PRIMARY KEY,
                     component TEXT NOT NULL,
                     description TEXT NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    updated_at_unix REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS rule_registry (
+                    key TEXT PRIMARY KEY,
+                    label TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    prompt_text TEXT NOT NULL,
+                    policy_json TEXT NOT NULL,
+                    default_enabled INTEGER NOT NULL,
+                    priority INTEGER NOT NULL,
+                    updated_at_unix REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS rule_settings (
+                    scope_type TEXT NOT NULL,
+                    scope_id TEXT NOT NULL DEFAULT '',
+                    rule_key TEXT NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    updated_at_unix REAL NOT NULL,
+                    PRIMARY KEY(scope_type, scope_id, rule_key)
+                );
+
+                CREATE TABLE IF NOT EXISTS workflow_registry (
+                    key TEXT PRIMARY KEY,
+                    slash_command TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    rule_keys_json TEXT NOT NULL,
+                    max_steps_override INTEGER,
+                    required_tools_json TEXT NOT NULL,
+                    prompt_prefix TEXT NOT NULL,
                     enabled INTEGER NOT NULL,
                     updated_at_unix REAL NOT NULL
                 );
@@ -475,6 +509,202 @@ class SQLiteStore:
                 "event_type": row["event_type"],
                 "component": row["component"],
                 "description": row["description"],
+                "enabled": bool(row["enabled"]),
+                "updated_at_unix": row["updated_at_unix"],
+            }
+            for row in rows
+        ]
+
+    def seed_default_rule_registry(self) -> None:
+        self.seed_rule_registry(default_rule_metadata())
+
+    def seed_rule_registry(self, metadata: list[dict[str, Any]]) -> None:
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO rule_registry(
+                    key, label, description, category, prompt_text, policy_json,
+                    default_enabled, priority, updated_at_unix
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    label = excluded.label,
+                    description = excluded.description,
+                    category = excluded.category,
+                    prompt_text = excluded.prompt_text,
+                    policy_json = excluded.policy_json,
+                    default_enabled = excluded.default_enabled,
+                    priority = excluded.priority,
+                    updated_at_unix = excluded.updated_at_unix
+                """,
+                [
+                    (
+                        item["key"],
+                        item.get("label", item["key"]),
+                        item.get("description", ""),
+                        item.get("category", "general"),
+                        item.get("prompt_text", ""),
+                        _json_dumps(item.get("policy") or {}),
+                        1 if item.get("default_enabled", False) else 0,
+                        int(item.get("priority", 100)),
+                        now,
+                    )
+                    for item in metadata
+                ],
+            )
+
+    def list_rule_registry(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT key, label, description, category, prompt_text, policy_json,
+                       default_enabled, priority, updated_at_unix
+                FROM rule_registry
+                ORDER BY priority ASC, key ASC
+                """
+            ).fetchall()
+        return [
+            {
+                "key": row["key"],
+                "label": row["label"],
+                "description": row["description"],
+                "category": row["category"],
+                "prompt_text": row["prompt_text"],
+                "policy": _json_loads(row["policy_json"], {}),
+                "default_enabled": bool(row["default_enabled"]),
+                "priority": row["priority"],
+                "updated_at_unix": row["updated_at_unix"],
+            }
+            for row in rows
+        ]
+
+    def set_rule_enabled(
+        self,
+        rule_key: str,
+        enabled: bool,
+        scope_type: str = "global",
+        scope_id: str | None = None,
+    ) -> None:
+        if scope_type not in {"global", "session", "run"}:
+            raise ValueError(f"unknown rule scope: {scope_type}")
+        if scope_type != "global" and not scope_id:
+            raise ValueError(f"{scope_type} rule settings require scope_id")
+        normalized_scope_id = "" if scope_type == "global" else (scope_id or "")
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO rule_settings(scope_type, scope_id, rule_key, enabled, updated_at_unix)
+                VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(scope_type, scope_id, rule_key) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    updated_at_unix = excluded.updated_at_unix
+                """,
+                (
+                    scope_type,
+                    normalized_scope_id,
+                    rule_key,
+                    1 if enabled else 0,
+                    now,
+                ),
+            )
+
+    def list_rule_settings(
+        self,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        where = []
+        if scope_type is not None:
+            where.append("scope_type = ?")
+            params.append(scope_type)
+        if scope_id is not None:
+            where.append("scope_id = ?")
+            params.append(scope_id)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT scope_type, scope_id, rule_key, enabled, updated_at_unix
+                FROM rule_settings
+                {clause}
+                ORDER BY scope_type ASC, scope_id ASC, rule_key ASC
+                """,
+                params,
+            ).fetchall()
+        return [
+            {
+                "scope_type": row["scope_type"],
+                "scope_id": row["scope_id"],
+                "rule_key": row["rule_key"],
+                "enabled": bool(row["enabled"]),
+                "updated_at_unix": row["updated_at_unix"],
+            }
+            for row in rows
+        ]
+
+    def seed_default_workflow_registry(self) -> None:
+        self.seed_workflow_registry(default_workflow_metadata())
+
+    def seed_workflow_registry(self, metadata: list[dict[str, Any]]) -> None:
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO workflow_registry(
+                    key, slash_command, description, rule_keys_json,
+                    max_steps_override, required_tools_json, prompt_prefix,
+                    enabled, updated_at_unix
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    slash_command = excluded.slash_command,
+                    description = excluded.description,
+                    rule_keys_json = excluded.rule_keys_json,
+                    max_steps_override = excluded.max_steps_override,
+                    required_tools_json = excluded.required_tools_json,
+                    prompt_prefix = excluded.prompt_prefix,
+                    enabled = excluded.enabled,
+                    updated_at_unix = excluded.updated_at_unix
+                """,
+                [
+                    (
+                        item["key"],
+                        item.get("command") or f"/{item['key']}",
+                        item.get("description", ""),
+                        _json_dumps(item.get("rule_keys") or []),
+                        item.get("max_steps_override"),
+                        _json_dumps(item.get("required_tools") or []),
+                        item.get("prompt_prefix", ""),
+                        1 if item.get("enabled", True) else 0,
+                        now,
+                    )
+                    for item in metadata
+                ],
+            )
+
+    def list_workflow_registry(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT key, slash_command, description, rule_keys_json,
+                       max_steps_override, required_tools_json, prompt_prefix,
+                       enabled, updated_at_unix
+                FROM workflow_registry
+                ORDER BY key ASC
+                """
+            ).fetchall()
+        return [
+            {
+                "key": row["key"],
+                "command": row["slash_command"],
+                "description": row["description"],
+                "rule_keys": _json_loads(row["rule_keys_json"], []),
+                "max_steps_override": row["max_steps_override"],
+                "required_tools": _json_loads(row["required_tools_json"], []),
+                "prompt_prefix": row["prompt_prefix"],
                 "enabled": bool(row["enabled"]),
                 "updated_at_unix": row["updated_at_unix"],
             }

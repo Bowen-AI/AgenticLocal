@@ -23,7 +23,9 @@ Implemented locally:
 - Policy checks around tools and workspace access.
 - Trace logging.
 - HTTP `/chat` and `/run` service shape.
+- Runtime provider/model selection through `/registry/models` and `/models/select`.
 - Ollama model adapter for local chat.
+- OpenAI-compatible chat-completions adapter for hosted or compatible APIs.
 - Embedded browser voice page using `/chat`.
 
 This matches the conceptual flow described in OpenAI's running-agents docs:
@@ -38,7 +40,8 @@ features.
 Missing or only represented as local analogues:
 
 - Official `Agent`, `Runner`, and SDK result types.
-- OpenAI model adapter.
+- Official OpenAI Agents SDK model adapter. A local OpenAI-compatible chat
+  completions adapter exists, but it is not the SDK runtime.
 - OpenAI Conversations API integration.
 - `previous_response_id` continuation.
 - Streaming agent runs.
@@ -58,6 +61,7 @@ Use this repo as the provider-neutral backend spine:
 
 ```text
 chat/session service
+-> model selection interface
 -> model adapter
 -> agent loop
 -> policy

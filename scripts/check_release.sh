@@ -12,6 +12,9 @@ python3 -m unittest discover -s tests -v
 echo "== smoke test =="
 scripts/smoke_test.sh
 
+echo "== package artifacts =="
+scripts/test_package_install.sh
+
 echo "== cli version =="
 python3 -m agentic_loop --version
 

@@ -12,11 +12,20 @@ class AgentSession:
     session_id: str | None = None
     storage: Any = None
 
-    def ask(self, user_message: str) -> AgentResult:
+    def ask(
+        self,
+        user_message: str,
+        enabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+        disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+        workflow_key: str | None = None,
+    ) -> AgentResult:
         result = self.controller.run(
             user_message,
             prior_messages=self.history,
             session_id=self.session_id,
+            enabled_rule_keys=enabled_rule_keys,
+            disabled_rule_keys=disabled_rule_keys,
+            workflow_key=workflow_key,
         )
         user = Message(role="user", content=user_message)
         assistant = Message(role="assistant", content=result.final_answer)

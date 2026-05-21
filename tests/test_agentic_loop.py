@@ -2,6 +2,8 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 from agentic_loop import (
@@ -9,6 +11,7 @@ from agentic_loop import (
     AgentSession,
     BrowserSpeechVoiceAdapter,
     JsonlMemory,
+    ModelSelection,
     ModelResponse,
     RealtimeVoiceAdapterSpec,
     RuleBasedModel,
@@ -19,6 +22,7 @@ from agentic_loop import (
     WorkspacePolicy,
     create_default_tools,
 )
+from agentic_loop.cli import main as cli_main
 from agentic_loop.ollama_model import OllamaChatModel
 from agentic_loop.factory import create_controller
 from agentic_loop.server import AgentServerApp, format_sse_events
@@ -337,7 +341,7 @@ class AgenticLoopTest(unittest.TestCase):
                     }
                 }
 
-        response = FakeOllama().respond([], create_default_tools().schemas(), "")
+        response = FakeOllama(model="test-model").respond([], create_default_tools().schemas(), "")
         self.assertEqual(response.tool_call.name, "inspect_csv")
         self.assertEqual(response.tool_call.arguments["path"], "data/sample.csv")
 
@@ -350,7 +354,7 @@ class AgenticLoopTest(unittest.TestCase):
                     return data
                 return {"message": {"role": "assistant", "content": "OK"}}
 
-        response = FakeOllama().respond([], create_default_tools().schemas(), "")
+        response = FakeOllama(model="test-model").respond([], create_default_tools().schemas(), "")
         self.assertIn("OK", response.final_answer)
         self.assertIn("does not support native tool calling", response.final_answer)
 
@@ -403,6 +407,83 @@ class AgenticLoopTest(unittest.TestCase):
             self.assertIn("inspect_csv", tool_names)
             self.assertIn("table_preview", ui_components)
 
+    def test_sqlite_rule_and_workflow_registries_are_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "agentic.db")
+            app = AgentServerApp(workspace=str(SAMPLE_WORKSPACE), db_path=db_path)
+
+            rules = {item["key"]: item for item in app.rule_registry()}
+            workflows = {item["key"]: item for item in app.workflow_registry()}
+            app.toggle_rule("max_effort", True)
+            recreated = AgentServerApp(workspace=str(SAMPLE_WORKSPACE), db_path=db_path)
+            recreated_rules = {item["key"]: item for item in recreated.rule_registry()}
+
+            self.assertIn("max_effort", rules)
+            self.assertIn("safe_writes", rules)
+            self.assertEqual(workflows["loop"]["command"], "/loop")
+            self.assertEqual(workflows["search"]["command"], "/search")
+            self.assertTrue(recreated_rules["max_effort"]["enabled"])
+
+    def test_active_rules_are_injected_into_model_context(self):
+        class CapturingModel:
+            def __init__(self):
+                self.messages = []
+
+            def respond(self, messages, tools, state_summary):
+                self.messages = messages
+                return ModelResponse.final("done")
+
+        model = CapturingModel()
+        result = self.make_controller(model=model).run(
+            "hello",
+            enabled_rule_keys={"max_effort"},
+        )
+        combined = "\n".join(message.content for message in model.messages)
+
+        self.assertEqual(result.final_answer, "done")
+        self.assertIn("Active rules:", combined)
+        self.assertIn("max_effort", combined)
+
+    def test_safe_writes_rule_requires_approval_before_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "outputs").mkdir()
+            model = ScriptedModel(
+                [
+                    ModelResponse.call(
+                        "write_file",
+                        {"path": "outputs/note.txt", "content": "needs review"},
+                        "call_write",
+                    ),
+                    ModelResponse.final("stopped after approval"),
+                ]
+            )
+            result = self.make_controller(model=model, workspace=workspace).run(
+                "Write a note.",
+                enabled_rule_keys={"safe_writes"},
+            )
+
+            self.assertEqual(result.state.steps[0].action, "approval_required")
+            self.assertFalse((workspace / "outputs" / "note.txt").exists())
+
+    def test_search_workflow_requires_network_tools(self):
+        result = self.make_controller().run("Search the internet for agentic AI.", workflow_key="search")
+
+        self.assertEqual(result.state.steps[0].action, "workflow_unavailable")
+        self.assertIn("--enable-network-tools", result.final_answer)
+
+    def test_cli_lists_rules_and_workflows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = StringIO()
+            with redirect_stdout(output):
+                exit_code = cli_main(["--db", str(Path(tmp) / "agentic.db"), "--rules", "--workflows"])
+
+            text = output.getvalue()
+            self.assertEqual(exit_code, 0)
+            self.assertIn("max_effort", text)
+            self.assertIn("/loop", text)
+            self.assertIn("/search", text)
+
     def test_sse_stream_uses_persisted_events(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = AgentServerApp(
@@ -421,6 +502,57 @@ class AgenticLoopTest(unittest.TestCase):
     def test_provider_selection_rejects_unknown_provider(self):
         with self.assertRaises(ValueError):
             create_controller(provider="unknown", db_path=None)
+
+    def test_non_rule_provider_requires_runtime_model_selection(self):
+        with self.assertRaisesRegex(ValueError, "requires a model"):
+            create_controller(provider="ollama", db_path=None)
+
+    def test_server_model_registry_and_selection_are_runtime_configurable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+            )
+            registry = app.model_registry()
+            providers = {item["provider"] for item in registry["providers"]}
+            selection = app.model_selection_from_payload(
+                {"model": {"provider": "rule", "name": "not-used"}}
+            )
+            result = app.run_once("hello", model_selection=selection)
+            selected = app.select_model(
+                ModelSelection.from_values(provider="rule"),
+                session_id=result.get("session_id"),
+            )
+
+            self.assertIn("ollama", providers)
+            self.assertIn("openai", providers)
+            self.assertIn("gemini", providers)
+            self.assertEqual(result["model"]["provider"], "rule")
+            self.assertEqual(result["model"]["model"], "not-used")
+            self.assertEqual(selected["model"]["provider"], "rule")
+
+    def test_server_rejects_incomplete_model_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+            )
+
+            with self.assertRaisesRegex(ValueError, "requires a model"):
+                app.model_selection_from_payload({"provider": "ollama"})
+            with self.assertRaisesRegex(ValueError, "requires api_base"):
+                app.model_selection_from_payload({"provider": "gemini", "model": "gemini-model"})
+
+    def test_cli_lists_model_providers(self):
+        output = StringIO()
+        with redirect_stdout(output):
+            exit_code = cli_main(["--models"])
+
+        text = output.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("ollama", text)
+        self.assertIn("openai-compatible", text)
+        self.assertIn("gemini", text)
 
     def test_voice_adapter_interface_can_be_mocked(self):
         browser = BrowserSpeechVoiceAdapter()
@@ -498,7 +630,11 @@ class AgenticLoopTest(unittest.TestCase):
         self.assertIn("SpeechRecognition", html)
         self.assertIn("speechSynthesis", html)
         self.assertIn('fetch("/chat"', html)
+        self.assertIn('fetch("/registry/rules"', html)
+        self.assertIn('fetch("/workflows/start"', html)
         self.assertIn("Tool timeline", html)
+        self.assertIn("Rules", html)
+        self.assertIn("Workflows", html)
 
 
 if __name__ == "__main__":

@@ -21,9 +21,15 @@ This checks:
 - Python syntax compilation.
 - Unit tests.
 - End-to-end CLI smoke test.
+- Rule/workflow CLI and registry behavior through the unit/smoke suite.
+- Runtime model/provider selection registry and validation.
+- Universal wheel and source tarball creation.
+- Wheel install smoke test when `python3 -m venv` is available.
 - CLI version.
 - Package metadata.
 - Version consistency between `pyproject.toml` and `agentic_loop.__version__`.
+
+CI runs the release check on Linux and macOS with Python 3.11 and 3.12.
 
 ## Current Status
 
@@ -48,7 +54,10 @@ Test coverage includes:
 - JSONL memory remember/recall.
 - SQLite memory remember/recall.
 - Durable SQLite server sessions.
-- SQLite workflow event and registry persistence.
+- SQLite workflow event and tool/UI/rule/workflow registry persistence.
+- Rule context injection and safe write approval behavior.
+- Workflow presets, including `/search` requiring network tools.
+- Model/provider registry and per-request served model selection.
 - SSE event formatting.
 - Max-step stop condition.
 - Trace logging.
@@ -56,6 +65,7 @@ Test coverage includes:
 - Interactive chat smoke path.
 - Server app session behavior.
 - Embedded voice page rendering.
+- Embedded rule/workflow controls on the voice page.
 - Ollama adapter tool-call parsing.
 - Ollama adapter fallback for models that do not support native tools.
 
@@ -78,6 +88,19 @@ Voice support is implemented as an embedded browser page at `/voice`. It uses
 browser speech recognition/synthesis and the existing `/chat` endpoint. A
 provider-neutral `VoiceAdapter` interface exists for later Gemini Live Voice or
 OpenAI Realtime integrations.
+
+## Packaging
+
+Build artifacts locally:
+
+```bash
+scripts/package_release.sh
+scripts/test_package_install.sh
+```
+
+The package builder emits `dist/agentic_loop-*-py3-none-any.whl` and
+`dist/agentic-loop-*.tar.gz` using only the Python standard library. The wheel
+is platform-independent for Linux and macOS.
 
 ## Public Release Note
 

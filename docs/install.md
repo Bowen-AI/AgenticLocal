@@ -42,6 +42,30 @@ Open voice mode:
 http://127.0.0.1:8765/voice
 ```
 
+## Easy Install On Linux Or macOS
+
+From a local checkout:
+
+```bash
+scripts/install.sh
+agentic-loop --version
+agentic-loop "Inspect data/sample.csv as a dataset."
+```
+
+The installer creates an isolated environment under
+`~/.local/share/agentic-loop` and writes a launcher to `~/.local/bin`. Add
+`~/.local/bin` to `PATH` if your shell does not already include it.
+
+If Python venv/pip support is missing, install it and rerun the script:
+
+```bash
+# macOS with Homebrew
+brew install python
+
+# Debian/Ubuntu
+sudo apt install python3-venv python3-pip
+```
+
 ## Editable Install
 
 When `pip` is available:
@@ -59,6 +83,18 @@ agentic-loop chat
 agentic-loop serve --host 127.0.0.1 --port 8765
 ```
 
+## Build Packages
+
+Build a universal wheel and source tarball:
+
+```bash
+scripts/package_release.sh
+ls dist/
+```
+
+The package builder uses only the Python standard library. The wheel is pure
+Python and works on Linux and macOS with Python 3.11 or newer.
+
 ## Durable State
 
 By default, app state is stored in:
@@ -68,7 +104,8 @@ By default, app state is stored in:
 ```
 
 That SQLite database stores sessions, messages, run steps, long-term memory,
-tool/UI registry metadata, and events/traces. It is ignored by git.
+tool/UI registry metadata, rule/workflow registry metadata, and events/traces.
+It is ignored by git.
 
 Use a different database path:
 
@@ -124,6 +161,8 @@ Fetch https://example.com and summarize it.
 ## Ollama
 
 For local model runs, install Ollama separately and pull a tool-capable model.
+The runtime does not require Ollama by default; choose an Ollama model only when
+you use `--provider ollama`.
 
 ```bash
 ollama pull gemma4:e4b
@@ -159,10 +198,50 @@ Call it:
 ```bash
 curl -s http://127.0.0.1:8765/health
 curl -s http://127.0.0.1:8765/tools
+curl -s http://127.0.0.1:8765/registry/models
+curl -s http://127.0.0.1:8765/registry/rules
+curl -s http://127.0.0.1:8765/registry/workflows
 curl -s -X POST http://127.0.0.1:8765/chat \
   -H "Content-Type: application/json" \
-  -d '{"message":"Inspect data/sample.csv as a dataset."}'
+  -d '{"message":"Inspect data/sample.csv as a dataset.","workflow":"loop"}'
 curl -N "http://127.0.0.1:8765/events?follow=1&timeout=30"
+```
+
+Select a provider/model per served request:
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello","model":{"provider":"ollama","name":"your-local-model"}}'
+
+curl -s -X POST http://127.0.0.1:8765/models/select \
+  -H "Content-Type: application/json" \
+  -d '{"model":{"provider":"openai-compatible","name":"your-model","api_base":"https://provider.example/v1","api_key":"..."}}'
+```
+
+Model selection payloads use this shape:
+
+```json
+{
+  "model": {
+    "provider": "rule | ollama | openai | openai-compatible | gemini | localai",
+    "name": "provider-specific-model-name",
+    "ollama_host": "http://127.0.0.1:11434",
+    "api_base": "https://provider.example/v1",
+    "api_key": "optional-secret"
+  }
+}
+```
+
+`rule` needs no model. `ollama`, `openai`, `openai-compatible`, `gemini`, and
+`localai` require an explicit model name. Compatible hosted providers also need
+the right `api_base` and, when required by that provider, an API key.
+
+Use the CLI against a running server:
+
+```bash
+agentic-loop client --models
+agentic-loop client --provider ollama --model your-local-model "hello"
 ```
 
 Useful endpoints:
@@ -176,10 +255,16 @@ GET  /events
 GET  /events?follow=1&timeout=30
 GET  /registry/tools
 GET  /registry/ui
+GET  /registry/rules
+GET  /registry/workflows
+GET  /registry/models
 GET  /voice
 POST /chat
 POST /run
 POST /sessions
+POST /models/select
+POST /rules/toggle
+POST /workflows/start
 ```
 
 ## Verify

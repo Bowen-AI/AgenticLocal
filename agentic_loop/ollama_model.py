@@ -13,7 +13,7 @@ class OllamaError(RuntimeError):
 class OllamaChatModel:
     def __init__(
         self,
-        model: str = "gemma3:270m",
+        model: str,
         host: str = "http://127.0.0.1:11434",
         timeout_s: float = 120.0,
         use_tools: bool = True,

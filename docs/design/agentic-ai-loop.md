@@ -48,7 +48,9 @@ This repo implements the design as a small Python runtime:
 agentic_loop/
   controller.py  # loop/controller
   model.py       # model interface plus test/demo models
+  model_selection.py # provider/model selection contract
   ollama_model.py # Ollama chat adapter
+  providers/     # OpenAI-compatible and LocalAI adapters
   tools.py       # tool schemas and real tool functions
   policy.py      # permissions and safety checks
   context.py     # what gets sent to the model each turn
@@ -66,9 +68,9 @@ agentic_loop/
 
 The default demo uses `RuleBasedModel`, a deterministic planner that behaves
 like a tiny model for testing. That keeps the runtime testable without an API
-key. The repo also includes an Ollama adapter for local chat models. The
-controller depends on the `AgentModel` interface, so model providers can be
-swapped without rewriting the loop.
+key. The repo also includes Ollama, OpenAI-compatible, Gemini-compatible, and
+LocalAI adapter paths. The controller depends on the `AgentModel` interface, so
+model providers can be swapped without rewriting the loop.
 
 Run it:
 
@@ -88,23 +90,34 @@ Run it as a local HTTP service:
 python3 -m agentic_loop serve --host 127.0.0.1 --port 8765
 ```
 
+The service starts with a default provider, but it does not lock the process to
+one model. Clients can discover provider requirements and choose model settings
+per request or per session:
+
+```bash
+curl -s http://127.0.0.1:8765/registry/models
+curl -s -X POST http://127.0.0.1:8765/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello","model":{"provider":"ollama","name":"your-local-model"}}'
+```
+
 Then use voice mode in a browser:
 
 ```text
 http://127.0.0.1:8765/voice
 ```
 
-Run it with Ollama/Gemma after pulling the model:
+Run it with Ollama after pulling a model:
 
 ```bash
-ollama pull gemma3:270m
-python3 -m agentic_loop --provider ollama --model gemma3:270m \
+ollama pull your-local-model
+python3 -m agentic_loop --provider ollama --model your-local-model \
   "Reply with exactly: OK"
 ```
 
-Note: `gemma3:270m` works as a chat model but does not support native Ollama
-tool calling. Use a tool-capable Ollama model for native tool-calling agent
-runs.
+Note: Ollama does not require this project to pre-pick a model. The model name
+is chosen by the CLI, HTTP client, or future UI. Use a model that advertises
+native tool calling when you want the model itself to request tools.
 
 Test it:
 
@@ -589,14 +602,15 @@ Bad memory:
 
 Build in this order:
 
-1. Hard-code the loop with one model and a max step count.
-2. Add two safe tools: `inspect_dataset` and `plot_signal`.
-3. Add policy checks around file access and output paths.
-4. Add structured working state.
-5. Add logs/traces for every model turn and tool call.
-6. Add simple evals: artifact exists, schema valid, no raw data modified.
-7. Add retrieval over project docs/data summaries.
-8. Add long-term memory only after the state model is clear.
+1. Hard-code the loop shape with a deterministic model and max step count.
+2. Add a provider/model selection interface before treating hosted/local model choices as product state.
+3. Add two safe tools: `inspect_dataset` and `plot_signal`.
+4. Add policy checks around file access and output paths.
+5. Add structured working state.
+6. Add logs/traces for every model turn and tool call.
+7. Add simple evals: artifact exists, schema valid, no raw data modified.
+8. Add retrieval over project docs/data summaries.
+9. Add long-term memory only after the state model is clear.
 
 Do not start with memory. Start with the loop.
 

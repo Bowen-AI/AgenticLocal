@@ -10,6 +10,7 @@ from .logs import JsonlTraceLogger
 from .memory import MemoryStore
 from .model import AgentModel
 from .policy import WorkspacePolicy
+from .rules import RuleResolver, WorkflowDefinition
 from .tools import ToolContext, ToolRegistry, WebClient, serialize_tool_result
 from .types import AgentState, AgentStep, Message
 
@@ -35,6 +36,10 @@ class AgentController:
         max_steps: int = 8,
         storage: Any = None,
         web_client: WebClient | None = None,
+        rule_resolver: RuleResolver | None = None,
+        enabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+        disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+        workflow_key: str | None = None,
     ):
         self.model = model
         self.tools = tools
@@ -47,6 +52,10 @@ class AgentController:
         self.evaluator = BasicEvaluator(self.workspace_root)
         self.storage = storage
         self.web_client = web_client
+        self.rule_resolver = rule_resolver or RuleResolver(storage)
+        self.enabled_rule_keys = set(enabled_rule_keys or ())
+        self.disabled_rule_keys = set(disabled_rule_keys or ())
+        self.workflow_key = workflow_key
 
     def run(
         self,
@@ -54,25 +63,71 @@ class AgentController:
         prior_messages: list[Message] | None = None,
         session_id: str | None = None,
         run_id: str | None = None,
+        enabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+        disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+        workflow_key: str | None = None,
     ) -> AgentResult:
         run_id = run_id or uuid.uuid4().hex
         state = AgentState(goal=goal)
-        messages = self.context_builder.initial_messages(goal, prior_messages)
+        run_enabled_rules = set(self.enabled_rule_keys)
+        run_enabled_rules.update(enabled_rule_keys or ())
+        run_disabled_rules = set(self.disabled_rule_keys)
+        run_disabled_rules.update(disabled_rule_keys or ())
+        workflow = self._resolve_workflow(workflow_key or self.workflow_key)
+        workflow_error = self._workflow_error(workflow_key or self.workflow_key, workflow)
+        if workflow_error is not None:
+            state.final_answer = workflow_error
+            state.add_step(AgentStep(index=1, action="workflow_unavailable", error=workflow_error))
+            self.logger.log(
+                "workflow_unavailable",
+                {"workflow": workflow_key or self.workflow_key, "error": workflow_error},
+                session_id=session_id,
+                run_id=run_id,
+            )
+            self.logger.log(
+                "final_answer",
+                {"content": workflow_error},
+                session_id=session_id,
+                run_id=run_id,
+            )
+            return self._result(state, workflow_error, run_id, session_id)
+
+        messages = self.context_builder.initial_messages(
+            goal,
+            prior_messages,
+            workflow_prompt=workflow.prompt_prefix if workflow else None,
+        )
         tool_context = ToolContext(
             workspace_root=self.workspace_root,
             memory=self.memory,
             web_client=self.web_client,
         )
+        run_max_steps = workflow.max_steps_override if workflow and workflow.max_steps_override else self.max_steps
 
         self.logger.log(
             "run_started",
-            {"goal": goal, "policy": self.policy.describe()},
+            {
+                "goal": goal,
+                "policy": self.policy.describe(),
+                "workflow": workflow.key if workflow else None,
+            },
             session_id=session_id,
             run_id=run_id,
         )
 
-        for index in range(1, self.max_steps + 1):
-            context_message = self.context_builder.state_message(state, self.memory)
+        for index in range(1, run_max_steps + 1):
+            active_rules = self.rule_resolver.active_rules(
+                session_id=session_id,
+                run_id=run_id,
+                enabled_rule_keys=run_enabled_rules,
+                disabled_rule_keys=run_disabled_rules,
+                workflow=workflow,
+            )
+            context_message = self.context_builder.state_message(
+                state,
+                self.memory,
+                active_rules=active_rules,
+            )
             model_messages = [messages[0], context_message, *messages[1:]]
             self.logger.log(
                 "model_requested",
@@ -81,6 +136,7 @@ class AgentController:
                     "message_count": len(model_messages),
                     "tool_count": len(self.tools.schemas()),
                     "state_summary": state.summary(),
+                    "active_rules": [rule.key for rule in active_rules],
                 },
                 session_id=session_id,
                 run_id=run_id,
@@ -115,7 +171,16 @@ class AgentController:
                 break
 
             call = response.tool_call
+            active_rules = self.rule_resolver.active_rules(
+                session_id=session_id,
+                run_id=run_id,
+                enabled_rule_keys=run_enabled_rules,
+                disabled_rule_keys=run_disabled_rules,
+                workflow=workflow,
+            )
             decision = self.policy.check(call)
+            if decision.allowed:
+                decision = self.rule_resolver.policy_decision(call, active_rules)
             self.logger.log(
                 "tool_requested",
                 {
@@ -124,6 +189,7 @@ class AgentController:
                     "allowed": decision.allowed,
                     "reason": decision.reason,
                     "requires_approval": decision.requires_approval,
+                    "active_rules": [rule.key for rule in active_rules],
                 },
                 session_id=session_id,
                 run_id=run_id,
@@ -261,7 +327,7 @@ class AgentController:
         state.final_answer = "Agent stopped because the step limit was reached."
         self.logger.log(
             "max_steps_reached",
-            {"max_steps": self.max_steps},
+            {"max_steps": run_max_steps},
             session_id=session_id,
             run_id=run_id,
         )
@@ -394,3 +460,26 @@ class AgentController:
             evaluation=evaluation,
             run_id=run_id,
         )
+
+    def _resolve_workflow(self, workflow_key: str | None) -> WorkflowDefinition | None:
+        return self.rule_resolver.workflow(workflow_key)
+
+    def _workflow_error(
+        self,
+        workflow_key: str | None,
+        workflow: WorkflowDefinition | None,
+    ) -> str | None:
+        if not workflow_key:
+            return None
+        if workflow is None:
+            return f"Unknown workflow: {workflow_key}."
+        if not workflow.enabled:
+            return f"Workflow {workflow.command} is disabled."
+        missing_tools = sorted(set(workflow.required_tools) - self.tools.names())
+        if missing_tools:
+            missing = ", ".join(missing_tools)
+            return (
+                f"Workflow {workflow.command} requires unavailable tool(s): {missing}. "
+                "Start with --enable-network-tools."
+            )
+        return None

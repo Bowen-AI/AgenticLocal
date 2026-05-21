@@ -84,6 +84,10 @@ Start the local HTTP agent service:
 python3 -m agentic_loop serve --host 127.0.0.1 --port 8765
 ```
 
+The service starts with a default provider, but clients can choose provider and
+model per request or per session. The default is the dependency-free `rule`
+provider, so Ollama and API keys are optional.
+
 Expose public web/news tools in the local service:
 
 ```bash
@@ -106,9 +110,31 @@ curl -s http://127.0.0.1:8765/health
 curl -s http://127.0.0.1:8765/events
 curl -N "http://127.0.0.1:8765/events?follow=1&timeout=30"
 curl -s http://127.0.0.1:8765/memory
+curl -s http://127.0.0.1:8765/registry/models
+curl -s http://127.0.0.1:8765/registry/rules
+curl -s http://127.0.0.1:8765/registry/workflows
 curl -s -X POST http://127.0.0.1:8765/chat \
   -H "Content-Type: application/json" \
-  -d '{"message":"Inspect data/sample.csv as a dataset."}'
+  -d '{"message":"Inspect data/sample.csv as a dataset.","workflow":"loop"}'
+```
+
+Choose a served model per request:
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello","model":{"provider":"ollama","name":"your-local-model"}}'
+
+curl -s -X POST http://127.0.0.1:8765/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello","model":{"provider":"openai","name":"your-openai-model","api_key":"..."}}'
+```
+
+Use the CLI against a running server:
+
+```bash
+python3 -m agentic_loop client --models
+python3 -m agentic_loop client --provider ollama --model your-local-model "hello"
 ```
 
 By default, durable app state is stored in:
@@ -118,9 +144,20 @@ By default, durable app state is stored in:
 ```
 
 That SQLite database stores sessions, messages, run steps, long-term memory,
-events/traces, tool registry metadata, and UI registry metadata. JSONL memory
-and trace files are still available as optional legacy/export paths through
-`--memory` and `--trace`.
+events/traces, tool/UI registry metadata, and rule/workflow registry metadata.
+JSONL memory and trace files are still available as optional legacy/export
+paths through `--memory` and `--trace`.
+
+Rules and workflows can be listed from the CLI:
+
+```bash
+python3 -m agentic_loop --rules
+python3 -m agentic_loop --workflows
+python3 -m agentic_loop --workflow loop "Inspect data/sample.csv"
+python3 -m agentic_loop chat --enable-network-tools
+```
+
+Inside chat, use `/rules`, `/rule on max_effort`, `/loop`, and `/search`.
 
 ## Verification
 
@@ -184,7 +221,7 @@ Current coverage checks:
 - SQLite memory remember/recall
 - durable server sessions
 - persisted workflow events
-- tool/UI registry metadata
+- tool/UI/rule/workflow registry metadata
 - SSE event formatting
 - CSV inspection
 - max-step stopping
@@ -203,12 +240,35 @@ Run without installing:
 python3 -m agentic_loop "List files in the workspace."
 ```
 
-Install as an editable local package when `pip` is available:
+Install the `agentic-loop` command from a Linux or macOS checkout:
+
+```bash
+scripts/install.sh
+agentic-loop --version
+```
+
+The installer prefers an isolated venv under `~/.local/share/agentic-loop` and
+creates a launcher in `~/.local/bin`. If your system Python lacks venv/pip
+support, it prints the platform package to install.
+
+Build release artifacts:
+
+```bash
+scripts/package_release.sh
+ls dist/
+```
+
+This emits a universal wheel and source tarball without requiring `pip`,
+`wheel`, or `python -m build`.
+
+Install as an editable local package when `pip` is already available:
 
 ```bash
 python3 -m pip install -e .
 agentic-loop "Inspect data/sample.csv as a dataset."
 ```
+
+CI runs `scripts/check_release.sh` on Linux and macOS for Python 3.11 and 3.12.
 
 ## Code Map
 
@@ -248,12 +308,16 @@ User / UI
 HTTP API
   -> POST /chat
   -> POST /run
+  -> POST /models/select
   -> GET /events        SSE event stream snapshot
   -> GET /events?follow=1&timeout=30
   -> GET /tools         tool schemas + registry metadata
   -> GET /memory        long-term memory records
   -> GET /sessions      durable session list
   -> GET /registry/ui   UI component registry metadata
+  -> GET /registry/rules
+  -> GET /registry/workflows
+  -> GET /registry/models
 
 Agent Runtime
   -> Context Builder
@@ -261,12 +325,14 @@ Agent Runtime
        - Rule model
        - Ollama
        - OpenAI-compatible
+       - Gemini/OpenAI-compatible endpoints
        - LocalAI
        - other provider API keys through the adapter boundary
   -> Policy / Approval Engine
        - configured read roots
        - configured write roots
        - approval-required roots
+       - active rule checks
        - symlink/path escape checks
   -> Tool Registry
        - local file tools
@@ -284,6 +350,8 @@ Storage
        - long-term memory
        - tool registry metadata
        - UI registry metadata
+       - rule registry metadata + settings
+       - workflow registry metadata
        - traces/events
   -> Workspace files
        - configured read roots

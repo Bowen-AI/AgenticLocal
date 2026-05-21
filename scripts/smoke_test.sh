@@ -32,6 +32,19 @@ python3 -m agentic_loop \
   --trace "$TRACE_FILE"
 
 echo
+echo "== model registry =="
+MODELS_OUTPUT="$(python3 -m agentic_loop --models)"
+echo "$MODELS_OUTPUT"
+printf '%s' "$MODELS_OUTPUT" | python3 -c '
+import sys
+text = sys.stdin.read()
+assert "rule:" in text
+assert "ollama:" in text
+assert "openai-compatible:" in text
+assert "gemini:" in text
+'
+
+echo
 echo "== inspect csv =="
 INSPECT_OUTPUT="$(
   python3 -m agentic_loop \
