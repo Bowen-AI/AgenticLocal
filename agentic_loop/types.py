@@ -1,0 +1,90 @@
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+
+Role = Literal["system", "user", "assistant", "tool"]
+
+
+@dataclass
+class Message:
+    role: Role
+    content: str
+    name: str | None = None
+    tool_call_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.name is not None:
+            data["name"] = self.name
+        if self.tool_call_id is not None:
+            data["tool_call_id"] = self.tool_call_id
+        return data
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    name: str
+    arguments: dict[str, Any]
+    id: str = "call_0"
+
+
+@dataclass(frozen=True)
+class ModelResponse:
+    final_answer: str | None = None
+    tool_call: ToolCall | None = None
+
+    @classmethod
+    def final(cls, content: str) -> "ModelResponse":
+        return cls(final_answer=content)
+
+    @classmethod
+    def call(cls, name: str, arguments: dict[str, Any], call_id: str) -> "ModelResponse":
+        return cls(tool_call=ToolCall(name=name, arguments=arguments, id=call_id))
+
+
+@dataclass
+class PolicyDecision:
+    allowed: bool
+    reason: str = ""
+
+
+@dataclass
+class ToolResult:
+    ok: bool
+    content: Any
+    error: str | None = None
+
+
+@dataclass
+class AgentStep:
+    index: int
+    action: str
+    tool_name: str | None = None
+    arguments: dict[str, Any] = field(default_factory=dict)
+    observation: Any = None
+    allowed: bool = True
+    error: str | None = None
+
+
+@dataclass
+class AgentState:
+    goal: str
+    steps: list[AgentStep] = field(default_factory=list)
+    final_answer: str | None = None
+
+    def add_step(self, step: AgentStep) -> None:
+        self.steps.append(step)
+
+    def summary(self, max_steps: int = 5) -> str:
+        recent = self.steps[-max_steps:]
+        if not recent:
+            return "No steps have run yet."
+        lines = []
+        for step in recent:
+            if step.tool_name:
+                status = "allowed" if step.allowed else "denied"
+                lines.append(f"{step.index}. {step.tool_name} ({status})")
+            else:
+                lines.append(f"{step.index}. {step.action}")
+        return "\n".join(lines)
+

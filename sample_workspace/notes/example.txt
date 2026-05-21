@@ -1,0 +1,2 @@
+This workspace contains a tiny CSV and a note for the agent loop demo.
+
