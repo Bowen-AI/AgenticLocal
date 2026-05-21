@@ -31,6 +31,7 @@ PASS
 Test coverage includes:
 
 - Agent loop/controller behavior.
+- Repeated identical tool-call loop guard.
 - Tool calls.
 - Opt-in network tools for web search, news search, and URL fetch.
 - CSV inspection.

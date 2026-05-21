@@ -168,6 +168,7 @@ python3 -m unittest discover -s tests -v
 Current coverage checks:
 
 - loop/controller execution
+- repeated identical tool-call loop guard
 - tool calls
 - opt-in public web/news/fetch tools
 - workspace policy enforcement
@@ -266,7 +267,8 @@ Agent Runtime
        - local file tools
        - CSV inspection
        - memory tools
-       - future web, paper, dataset, MCP tools
+       - opt-in web/news/fetch tools
+       - future paper, dataset, MCP tools
   -> Event Logger
   -> Evaluator
 

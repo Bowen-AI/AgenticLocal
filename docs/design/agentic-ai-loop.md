@@ -146,6 +146,9 @@ for step in range(max_steps):
             })
             continue
 
+        if same_tool_and_arguments_already_succeeded(response.tool_call):
+            return final_answer_from_previous_tool_result(response.tool_call)
+
         result = run_tool(
             response.tool_call.name,
             response.tool_call.arguments,
@@ -162,7 +165,7 @@ return "Stopped because the step limit was reached."
 ```
 
 This is the skeleton. Production agents add better state, permissions, logging,
-human approvals, retries, and evaluations.
+human approvals, repeated-call loop guards, retries, and evaluations.
 
 ## What The JSON Is For
 
