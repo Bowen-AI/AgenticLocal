@@ -1,3 +1,8 @@
+---
+layout: default
+title: Voice Agents
+---
+
 # Voice Agents
 
 Status: implemented locally, OpenAI realtime integration planned

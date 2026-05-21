@@ -11,10 +11,12 @@ Current version: `0.1.0`
 
 Start here:
 
+- [Project Page](docs/index.html)
 - [Agentic AI: The Loop](docs/design/agentic-ai-loop.md)
 - [Install Guide](docs/install.md)
 - [Use Cases](docs/use-cases.md)
 - [Example Screenshots](docs/example-screenshots.md)
+- [GitHub Pages Deploy](docs/github-pages.md)
 
 ## Run The Demo
 
@@ -317,9 +319,11 @@ Retrieval memory
 
 Related notes:
 
+- [Project Page](docs/index.html)
 - [Install Guide](docs/install.md)
 - [Use Cases](docs/use-cases.md)
 - [Example Screenshots](docs/example-screenshots.md)
+- [GitHub Pages Deploy](docs/github-pages.md)
 - [OpenAI Agents SDK compatibility](docs/openai-sdk-compatibility.md)
 - [Ollama Gemma check](docs/ollama-gemma-check.md)
 - [Voice agents](docs/voice-agents.md)

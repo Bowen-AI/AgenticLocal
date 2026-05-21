@@ -1,3 +1,8 @@
+---
+layout: default
+title: Install Guide
+---
+
 # Install Guide
 
 AgenticLocal is dependency-free Python. You can run it directly from the repo,

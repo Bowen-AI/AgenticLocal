@@ -1,3 +1,8 @@
+---
+layout: default
+title: Use Cases
+---
+
 # Use Cases
 
 These use cases describe what AgenticLocal can do now, plus where the current

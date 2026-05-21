@@ -1,3 +1,8 @@
+---
+layout: default
+title: Architecture Decision
+---
+
 # Architecture Decision
 
 Status: current recommendation

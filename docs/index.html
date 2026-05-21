@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AgenticLocal</title>
+    <meta
+      name="description"
+      content="AgenticLocal is a local-first agent runtime with tools, workspace policy, durable SQLite state, event streams, and provider-swappable model adapters."
+    >
+    <meta property="og:title" content="AgenticLocal">
+    <meta
+      property="og:description"
+      content="A local-first agent runtime for tool use, workspace policy, durable memory, event streams, voice, and provider adapters."
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="assets/screenshots/voice-mode.svg">
+    <link rel="stylesheet" href="site.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="AgenticLocal home">
+        <span class="brand-mark" aria-hidden="true">AL</span>
+        <span>AgenticLocal</span>
+      </a>
+      <nav class="nav" aria-label="Project navigation">
+        <a href="#demo">Demo</a>
+        <a href="#runtime">Runtime</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="install.html">Install</a>
+        <a href="github-pages.html">Deploy</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-media" aria-hidden="true">
+          <img src="assets/screenshots/voice-mode.svg" alt="">
+        </div>
+        <div class="hero-copy">
+          <p class="eyebrow">Local-first agent runtime</p>
+          <h1 id="hero-title">AgenticLocal</h1>
+          <p class="lede">
+            A small, inspectable agent loop with tools, workspace policy, durable
+            SQLite state, streaming events, voice, and swappable model adapters.
+          </p>
+          <div class="hero-actions" aria-label="Primary links">
+            <a class="button primary" href="install.html">Install</a>
+            <a class="button secondary" href="example-screenshots.html">Screenshots</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="quickstart" aria-labelledby="quickstart-title">
+        <div class="section-heading">
+          <p class="eyebrow">Try it locally</p>
+          <h2 id="quickstart-title">One command to start exploring</h2>
+        </div>
+        <pre class="terminal" aria-label="Quickstart command"><code>python3 -m agentic_loop chat --enable-network-tools</code></pre>
+      </section>
+
+      <section id="demo" class="showcase" aria-labelledby="demo-title">
+        <div class="section-heading">
+          <p class="eyebrow">What it looks like</p>
+          <h2 id="demo-title">CLI, voice, and event streams on the same runtime</h2>
+        </div>
+        <div class="screenshot-grid">
+          <article class="screenshot-item">
+            <img src="assets/screenshots/cli-chat.svg" alt="Terminal chat using network tools">
+            <h3>Terminal chat</h3>
+            <p>Continuous local chat with file, memory, date/time, web, news, and fetch tools.</p>
+          </article>
+          <article class="screenshot-item">
+            <img src="assets/screenshots/event-stream.svg" alt="Event stream and registry views">
+            <h3>Streaming events</h3>
+            <p>Run, model, tool, approval, memory, and final-answer events persisted to SQLite.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="runtime" class="runtime" aria-labelledby="runtime-title">
+        <div class="section-heading">
+          <p class="eyebrow">Architecture</p>
+          <h2 id="runtime-title">Built around the real agent loop</h2>
+        </div>
+        <div class="runtime-layout">
+          <div class="flow" aria-label="Runtime flow">
+            <div>Context Builder</div>
+            <div>Brain Adapter</div>
+            <div>Policy Engine</div>
+            <div>Tool Registry</div>
+            <div>Event Logger</div>
+            <div>SQLite Storage</div>
+          </div>
+          <div class="runtime-copy">
+            <p>
+              The model chooses an action. The runtime checks policy, executes
+              approved tools, records events, persists state, and feeds the
+              observation back into the next step.
+            </p>
+            <ul class="check-list">
+              <li>Named read and write roots with path escape protection.</li>
+              <li>Durable sessions, memory, traces, and registry metadata.</li>
+              <li>Tool-call loop guard for repeated identical successful calls.</li>
+              <li>Rule, Ollama, OpenAI-compatible, and LocalAI adapter paths.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="use-cases" class="use-cases" aria-labelledby="use-cases-title">
+        <div class="section-heading">
+          <p class="eyebrow">Use cases</p>
+          <h2 id="use-cases-title">Practical local workflows</h2>
+        </div>
+        <div class="case-grid">
+          <article>
+            <h3>Workspace assistant</h3>
+            <p>Inspect files, read notes, and write safe outputs under configured roots.</p>
+          </article>
+          <article>
+            <h3>Dataset triage</h3>
+            <p>Preview CSV columns, row counts, missing values, and numeric ranges.</p>
+          </article>
+          <article>
+            <h3>Research and news</h3>
+            <p>Opt into web search, Google News RSS search, and URL fetching.</p>
+          </article>
+          <article>
+            <h3>Voice companion</h3>
+            <p>Use the browser voice page now; plug in realtime voice adapters later.</p>
+          </article>
+        </div>
+        <p class="section-link">
+          <a href="use-cases.html">Open the full use case guide</a>
+        </p>
+      </section>
+
+      <section class="docs-band" aria-labelledby="docs-title">
+        <div class="section-heading">
+          <p class="eyebrow">Docs</p>
+          <h2 id="docs-title">Everything needed to show the project</h2>
+        </div>
+        <div class="docs-links">
+          <a href="install.html">Install Guide</a>
+          <a href="architecture-decision.html">Architecture Decision</a>
+          <a href="example-screenshots.html">Example Screenshots</a>
+          <a href="github-pages.html">GitHub Pages Deploy</a>
+          <a href="ollama-gemma-check.html">Ollama Gemma Check</a>
+          <a href="voice-agents.html">Voice Agents</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>AgenticLocal 0.1.0</span>
+      <span>Local-first. Tool-aware. Policy-checked.</span>
+    </footer>
+  </body>
+</html>

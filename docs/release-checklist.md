@@ -1,3 +1,8 @@
+---
+layout: default
+title: Release Checklist
+---
+
 # Release Checklist
 
 Version: 0.1.0

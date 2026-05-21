@@ -1,3 +1,8 @@
+---
+layout: default
+title: Agentic AI Loop
+---
+
 # Agentic AI: The Loop
 
 Status: draft

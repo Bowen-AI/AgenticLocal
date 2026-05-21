@@ -1,3 +1,8 @@
+---
+layout: default
+title: OpenAI SDK Compatibility
+---
+
 # OpenAI Agents SDK Compatibility
 
 Status: current

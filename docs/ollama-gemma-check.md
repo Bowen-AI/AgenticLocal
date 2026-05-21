@@ -1,3 +1,8 @@
+---
+layout: default
+title: Ollama Gemma Check
+---
+
 # Ollama Gemma Check
 
 Status: tested

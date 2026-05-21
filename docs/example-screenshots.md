@@ -1,3 +1,8 @@
+---
+layout: default
+title: Example Screenshots
+---
+
 # Example Screenshots
 
 These checked-in SVGs are illustrative examples of the current CLI, HTTP/SSE,
