@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="720" viewBox="0 0 1120 720" role="img" aria-labelledby="title desc">
+  <title id="title">AgenticLocal terminal chat screenshot</title>
+  <desc id="desc">Illustrative terminal chat showing agentic-loop with network tools and current date responses.</desc>
+  <rect width="1120" height="720" fill="#f4f2ed"/>
+  <rect x="72" y="58" width="976" height="604" rx="8" fill="#15171a"/>
+  <rect x="72" y="58" width="976" height="46" rx="8" fill="#2b2f36"/>
+  <circle cx="102" cy="81" r="7" fill="#e36b5c"/>
+  <circle cx="126" cy="81" r="7" fill="#d9b55f"/>
+  <circle cx="150" cy="81" r="7" fill="#69b36d"/>
+  <text x="190" y="87" fill="#d7dde8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">agentic-loop chat --enable-network-tools</text>
+  <text x="104" y="145" fill="#e8edf4" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">agentic-loop chat</text>
+  <text x="104" y="177" fill="#98a2b3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">Type /help for commands, /exit to quit.</text>
+  <text x="104" y="229" fill="#90cdf4" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">&gt; hello</text>
+  <text x="104" y="262" fill="#eef2f7" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">Hi. I can use tools for files, CSVs, memory, date/time, and web/news search.</text>
+  <text x="104" y="315" fill="#90cdf4" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">&gt; what is today's date</text>
+  <text x="104" y="348" fill="#eef2f7" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">Today is Thursday, 2026-05-21. The local time is 14:32:09 PDT.</text>
+  <text x="104" y="401" fill="#90cdf4" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">&gt; tell me the news today top news</text>
+  <text x="104" y="434" fill="#eef2f7" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">I found 3 result(s) from Google News RSS:</text>
+  <text x="128" y="467" fill="#c6f6d5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">1. Morning Sprint: May 21 top news and weather headlines</text>
+  <text x="128" y="500" fill="#c6f6d5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">2. Top news stories for May 21, 2026 at 6 a.m.</text>
+  <text x="128" y="533" fill="#c6f6d5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">3. Latest local and national headlines</text>
+  <text x="104" y="586" fill="#90cdf4" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">&gt; /tools</text>
+  <text x="104" y="619" fill="#eef2f7" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">current_datetime, fetch_url, inspect_csv, list_files, recall, remember, search_news, search_web, write_file</text>
+</svg>

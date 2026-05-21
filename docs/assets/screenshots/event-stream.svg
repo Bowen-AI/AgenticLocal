@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="720" viewBox="0 0 1120 720" role="img" aria-labelledby="title desc">
+  <title id="title">AgenticLocal event stream screenshot</title>
+  <desc id="desc">Illustrative dashboard showing SSE events and registry metadata from the local HTTP API.</desc>
+  <rect width="1120" height="720" fill="#f6f7f9"/>
+  <text x="68" y="70" fill="#1f2937" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">Local HTTP Runtime</text>
+  <text x="68" y="102" fill="#667085" font-family="Inter, Arial, sans-serif" font-size="16">SSE stream, durable traces, and UI registry metadata</text>
+  <rect x="68" y="136" width="468" height="510" rx="8" fill="#ffffff" stroke="#d0d5dd"/>
+  <text x="96" y="176" fill="#344054" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">GET /events?follow=1</text>
+  <line x1="96" y1="198" x2="508" y2="198" stroke="#e4e7ec"/>
+  <text x="98" y="238" fill="#475467" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">id: 101</text>
+  <text x="98" y="265" fill="#2563eb" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">event: run_started</text>
+  <text x="98" y="292" fill="#475467" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">data: {"goal":"Inspect data/sample.csv"}</text>
+  <text x="98" y="342" fill="#475467" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">id: 102</text>
+  <text x="98" y="369" fill="#d97706" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">event: tool_requested</text>
+  <text x="98" y="396" fill="#475467" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">data: {"tool":"inspect_csv"}</text>
+  <text x="98" y="446" fill="#475467" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">id: 103</text>
+  <text x="98" y="473" fill="#16a34a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">event: tool_result</text>
+  <text x="98" y="500" fill="#475467" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">data: {"rows":4,"columns":["time","acc_y"]}</text>
+  <text x="98" y="550" fill="#475467" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">id: 104</text>
+  <text x="98" y="577" fill="#7c3aed" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">event: final_answer</text>
+  <text x="98" y="604" fill="#475467" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">data: {"content":"I inspected data/sample.csv"}</text>
+  <rect x="584" y="136" width="468" height="236" rx="8" fill="#ffffff" stroke="#d0d5dd"/>
+  <text x="612" y="176" fill="#344054" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">GET /registry/tools</text>
+  <line x1="612" y1="198" x2="1024" y2="198" stroke="#e4e7ec"/>
+  <text x="612" y="238" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">list_files -> file_browser</text>
+  <text x="612" y="270" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">inspect_csv -> table_preview</text>
+  <text x="612" y="302" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">search_news -> news_results</text>
+  <text x="612" y="334" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">write_file -> file_writer</text>
+  <rect x="584" y="410" width="468" height="236" rx="8" fill="#ffffff" stroke="#d0d5dd"/>
+  <text x="612" y="450" fill="#344054" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Storage</text>
+  <line x1="612" y1="472" x2="1024" y2="472" stroke="#e4e7ec"/>
+  <text x="612" y="512" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">.agentic/agentic.db</text>
+  <text x="612" y="544" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">sessions + messages</text>
+  <text x="612" y="576" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">working state + steps</text>
+  <text x="612" y="608" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">long-term memory + traces/events</text>
+</svg>

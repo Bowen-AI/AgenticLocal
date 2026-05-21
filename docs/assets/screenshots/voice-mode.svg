@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="720" viewBox="0 0 1120 720" role="img" aria-labelledby="title desc">
+  <title id="title">AgenticLocal browser voice mode screenshot</title>
+  <desc id="desc">Illustrative browser page for voice mode with transcript, controls, and tool timeline.</desc>
+  <rect width="1120" height="720" fill="#eef1f4"/>
+  <rect x="54" y="44" width="1012" height="632" rx="8" fill="#ffffff" stroke="#c9d1dc"/>
+  <rect x="54" y="44" width="1012" height="58" rx="8" fill="#26313f"/>
+  <text x="82" y="81" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700">agentic-loop voice</text>
+  <text x="866" y="80" fill="#cbd5e1" font-family="Inter, Arial, sans-serif" font-size="15">http://127.0.0.1:8765/voice</text>
+  <rect x="82" y="132" width="610" height="490" rx="8" fill="#f8fafc" stroke="#d8dee8"/>
+  <text x="108" y="166" fill="#273142" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Conversation</text>
+  <rect x="108" y="194" width="530" height="72" rx="8" fill="#e8f1ff" stroke="#c7dbff"/>
+  <text x="130" y="225" fill="#1f3b63" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">You</text>
+  <text x="130" y="248" fill="#1f3b63" font-family="Inter, Arial, sans-serif" font-size="15">Search news about robotics.</text>
+  <rect x="108" y="290" width="530" height="112" rx="8" fill="#ffffff" stroke="#d8dee8"/>
+  <text x="130" y="322" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">Agent</text>
+  <text x="130" y="348" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="15">I found 5 result(s) from Google News RSS:</text>
+  <text x="130" y="374" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="15">1. Robotics researchers announce new field trial</text>
+  <rect x="108" y="436" width="530" height="70" rx="8" fill="#ecfdf5" stroke="#bbf7d0"/>
+  <text x="130" y="467" fill="#166534" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">Agent</text>
+  <text x="130" y="490" fill="#166534" font-family="Inter, Arial, sans-serif" font-size="15">Ready for the next question.</text>
+  <rect x="108" y="548" width="150" height="42" rx="8" fill="#2563eb"/>
+  <text x="139" y="574" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">Start voice</text>
+  <rect x="270" y="548" width="150" height="42" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="311" y="574" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">Stop</text>
+  <rect x="720" y="132" width="318" height="490" rx="8" fill="#f8fafc" stroke="#d8dee8"/>
+  <text x="746" y="166" fill="#273142" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Tool timeline</text>
+  <rect x="746" y="196" width="244" height="70" rx="8" fill="#ffffff" stroke="#d8dee8"/>
+  <text x="768" y="225" fill="#64748b" font-family="Inter, Arial, sans-serif" font-size="13">run_started</text>
+  <text x="768" y="248" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="15">Goal received</text>
+  <rect x="746" y="286" width="244" height="70" rx="8" fill="#fff7ed" stroke="#fed7aa"/>
+  <text x="768" y="315" fill="#9a3412" font-family="Inter, Arial, sans-serif" font-size="13">tool_requested</text>
+  <text x="768" y="338" fill="#7c2d12" font-family="Inter, Arial, sans-serif" font-size="15">search_news</text>
+  <rect x="746" y="376" width="244" height="70" rx="8" fill="#f0fdf4" stroke="#bbf7d0"/>
+  <text x="768" y="405" fill="#166534" font-family="Inter, Arial, sans-serif" font-size="13">tool_result</text>
+  <text x="768" y="428" fill="#166534" font-family="Inter, Arial, sans-serif" font-size="15">5 news results</text>
+  <rect x="746" y="466" width="244" height="70" rx="8" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text x="768" y="495" fill="#1d4ed8" font-family="Inter, Arial, sans-serif" font-size="13">final_answer</text>
+  <text x="768" y="518" fill="#1e3a8a" font-family="Inter, Arial, sans-serif" font-size="15">Spoken response</text>
+</svg>
