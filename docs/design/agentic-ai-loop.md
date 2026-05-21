@@ -78,11 +78,31 @@ Run it:
 python3 -m agentic_loop "Inspect data/sample.csv as a dataset."
 ```
 
+Install it from Linux or macOS with the bootstrap script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Bowen-AI/AgenticLocal/main/scripts/install.sh \
+  | bash -s -- --with-ollama
+```
+
+The installer can install Ollama and pulls the default `qwen3.5:9b` model when
+Ollama is available. Use `--no-model-pull` or `--no-ollama` for narrower
+installs.
+
 Run it as an interactive chat:
 
 ```bash
 python3 -m agentic_loop chat
 ```
+
+This starts with Ollama `qwen3.5:9b` by default. Switch models inside chat with:
+
+```text
+/models
+/model ollama qwen3.5:9b
+```
+
+Use `--provider rule` for deterministic offline tests and demos.
 
 Run it as a local HTTP service:
 
@@ -90,9 +110,11 @@ Run it as a local HTTP service:
 python3 -m agentic_loop serve --host 127.0.0.1 --port 8765
 ```
 
-The service starts with a default provider, but it does not lock the process to
-one model. Clients can discover provider requirements and choose model settings
-per request or per session:
+The service defaults to Ollama with `qwen3.5:9b` and enables public web/news/fetch
+tools. It does not lock the process to one model: clients can discover provider
+requirements and choose model settings per request or per session. Start with
+`--disable-network-tools` when the HTTP API should run without public network
+tools.
 
 ```bash
 curl -s http://127.0.0.1:8765/registry/models
@@ -115,9 +137,10 @@ python3 -m agentic_loop --provider ollama --model your-local-model \
   "Reply with exactly: OK"
 ```
 
-Note: Ollama does not require this project to pre-pick a model. The model name
-is chosen by the CLI, HTTP client, or future UI. Use a model that advertises
-native tool calling when you want the model itself to request tools.
+Note: Ollama itself does not require this project to pre-pick a model. The
+runtime exposes provider/model selection through CLI and HTTP; `qwen3.5:9b` is
+only the friendly chat/serve default. Use a model that advertises native tool
+calling when you want the model itself to request tools.
 
 Test it:
 

@@ -54,9 +54,11 @@
       <section class="quickstart" aria-labelledby="quickstart-title">
         <div class="section-heading">
           <p class="eyebrow">Try it locally</p>
-          <h2 id="quickstart-title">One command to start exploring</h2>
+          <h2 id="quickstart-title">Install and start exploring</h2>
         </div>
-        <pre class="terminal" aria-label="Quickstart command"><code>python3 -m agentic_loop chat --enable-network-tools</code></pre>
+        <pre class="terminal" aria-label="Quickstart command"><code>curl -fsSL https://raw.githubusercontent.com/Bowen-AI/AgenticLocal/main/scripts/install.sh \
+  | bash -s -- --with-ollama
+agentic-loop chat --enable-network-tools</code></pre>
       </section>
 
       <section id="demo" class="showcase" aria-labelledby="demo-title">

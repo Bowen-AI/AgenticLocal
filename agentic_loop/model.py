@@ -296,16 +296,18 @@ class RuleBasedModel:
         return f"Tool {tool_message.name} completed."
 
     def _direct_answer(self, goal: str, available_tools: set[str]) -> str:
-        if goal in {"hello", "hi", "hey", "yo"}:
+        if goal in {"hello", "hi", "hey", "yo"} or self._mentions(goal, "hello", "hi"):
             return (
-                "Hi. I can use tools for files, CSVs, memory, and date/time. "
-                "If you started chat with --enable-network-tools, I can also search web/news and fetch URLs."
+                "Hi. I am running the deterministic rule provider, which is for tools, tests, "
+                "and offline demos rather than open-ended chat. Use a model provider such as "
+                "ollama, openai, openai-compatible, gemini, or localai for general conversation."
             )
         if goal in {"what", "??", "?", "help"}:
             tool_names = ", ".join(sorted(available_tools))
             return f"Try asking me to use a tool. Available tools: {tool_names}."
         return (
-            "I did not recognize a tool-oriented request. Try: "
+            "I am in deterministic rule mode, not a general chat model. Select a model provider "
+            "for open-ended conversation, or try a tool-oriented request like: "
             "'list files', 'inspect data/sample.csv', 'what is today's date', "
             "'search news about AI', or 'fetch https://example.com'."
         )

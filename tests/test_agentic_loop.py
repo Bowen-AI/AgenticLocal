@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from agentic_loop import (
     AgentController,
@@ -23,9 +24,11 @@ from agentic_loop import (
     create_default_tools,
 )
 from agentic_loop.cli import main as cli_main
+from agentic_loop.chat import run_chat
 from agentic_loop.ollama_model import OllamaChatModel
 from agentic_loop.factory import create_controller
-from agentic_loop.server import AgentServerApp, format_sse_events
+from agentic_loop.model_selection import DEFAULT_INTERACTIVE_MODEL, parse_model_command
+from agentic_loop.server import AgentServerApp, format_sse_events, serve as serve_command
 from agentic_loop.tools import ToolContext
 from agentic_loop.voice import voice_page_html
 
@@ -292,7 +295,7 @@ class AgenticLoopTest(unittest.TestCase):
         hello = self.make_controller().run("hello")
         vague = self.make_controller().run("??")
 
-        self.assertIn("Hi.", hello.final_answer)
+        self.assertIn("deterministic rule provider", hello.final_answer)
         self.assertIn("Available tools", vague.final_answer)
 
     def test_agent_answers_current_date_through_tool(self):
@@ -422,6 +425,9 @@ class AgenticLoopTest(unittest.TestCase):
             self.assertIn("safe_writes", rules)
             self.assertEqual(workflows["loop"]["command"], "/loop")
             self.assertEqual(workflows["search"]["command"], "/search")
+            self.assertEqual(workflows["release"]["command"], "/release")
+            self.assertIn("safe_writes", workflows["release"]["rule_keys"])
+            self.assertIn("read_file", workflows["release"]["required_tools"])
             self.assertTrue(recreated_rules["max_effort"]["enabled"])
 
     def test_active_rules_are_injected_into_model_context(self):
@@ -443,6 +449,24 @@ class AgenticLoopTest(unittest.TestCase):
         self.assertEqual(result.final_answer, "done")
         self.assertIn("Active rules:", combined)
         self.assertIn("max_effort", combined)
+
+    def test_release_workflow_injects_release_prompt_and_rules(self):
+        class CapturingModel:
+            def __init__(self):
+                self.messages = []
+
+            def respond(self, messages, tools, state_summary):
+                self.messages = messages
+                return ModelResponse.final("release ready")
+
+        model = CapturingModel()
+        result = self.make_controller(model=model).run("Prepare release.", workflow_key="release")
+        combined = "\n".join(message.content for message in model.messages)
+
+        self.assertEqual(result.final_answer, "release ready")
+        self.assertIn("Workflow /release is active", combined)
+        self.assertIn("max_effort", combined)
+        self.assertIn("safe_writes", combined)
 
     def test_safe_writes_rule_requires_approval_before_write(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -482,6 +506,7 @@ class AgenticLoopTest(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertIn("max_effort", text)
             self.assertIn("/loop", text)
+            self.assertIn("/release", text)
             self.assertIn("/search", text)
 
     def test_sse_stream_uses_persisted_events(self):
@@ -543,6 +568,54 @@ class AgenticLoopTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "requires api_base"):
                 app.model_selection_from_payload({"provider": "gemini", "model": "gemini-model"})
 
+    def test_serve_enables_network_tools_by_default(self):
+        created_apps = []
+
+        class FakeServer:
+            def __init__(self, address, handler):
+                self.address = address
+                self.handler = handler
+
+            def serve_forever(self):
+                return None
+
+        def fake_app(**kwargs):
+            created_apps.append(kwargs)
+            return object()
+
+        with redirect_stdout(StringIO()), patch(
+            "agentic_loop.server.AgentServerApp",
+            side_effect=fake_app,
+        ), patch("agentic_loop.server.ThreadingHTTPServer", FakeServer):
+            exit_code = serve_command(["--port", "0"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(created_apps[0]["enable_network_tools"])
+
+    def test_serve_can_disable_default_network_tools(self):
+        created_apps = []
+
+        class FakeServer:
+            def __init__(self, address, handler):
+                self.address = address
+                self.handler = handler
+
+            def serve_forever(self):
+                return None
+
+        def fake_app(**kwargs):
+            created_apps.append(kwargs)
+            return object()
+
+        with redirect_stdout(StringIO()), patch(
+            "agentic_loop.server.AgentServerApp",
+            side_effect=fake_app,
+        ), patch("agentic_loop.server.ThreadingHTTPServer", FakeServer):
+            exit_code = serve_command(["--port", "0", "--disable-network-tools"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(created_apps[0]["enable_network_tools"])
+
     def test_cli_lists_model_providers(self):
         output = StringIO()
         with redirect_stdout(output):
@@ -553,6 +626,70 @@ class AgenticLoopTest(unittest.TestCase):
         self.assertIn("ollama", text)
         self.assertIn("openai-compatible", text)
         self.assertIn("gemini", text)
+
+    def test_install_script_exposes_ollama_setup_options(self):
+        text = (REPO_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+        self.assertIn("--with-ollama", text)
+        self.assertIn("--pull-model", text)
+        self.assertIn("--no-ollama", text)
+        self.assertIn("--source-url", text)
+        self.assertIn("AGENTIC_LOOP_OLLAMA_MODEL", text)
+        self.assertIn("AGENTIC_LOOP_SOURCE_URL", text)
+        self.assertIn("https://ollama.com/install.sh", text)
+        self.assertIn("https://github.com/Bowen-AI/AgenticLocal/archive/refs/heads/main.tar.gz", text)
+        self.assertIn("DEFAULT_INTERACTIVE_MODEL", text)
+
+    def test_model_command_clears_stale_settings_when_provider_changes(self):
+        ollama = ModelSelection.from_values(provider="ollama", model_name=DEFAULT_INTERACTIVE_MODEL)
+        rule = parse_model_command("rule", fallback=ollama)
+        back_to_ollama = parse_model_command("ollama", fallback=rule)
+
+        self.assertEqual(rule.provider, "rule")
+        self.assertIsNone(rule.model_name)
+        self.assertEqual(back_to_ollama.provider, "ollama")
+        self.assertEqual(back_to_ollama.model_name, DEFAULT_INTERACTIVE_MODEL)
+
+    def test_chat_can_show_and_switch_models(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = StringIO()
+            with redirect_stdout(output), patch(
+                "builtins.input",
+                side_effect=["/model", "/models", "/model rule", "/exit"],
+            ):
+                exit_code = run_chat(
+                    [
+                        "--db",
+                        str(Path(tmp) / "agentic.db"),
+                        "--provider",
+                        "rule",
+                    ],
+                )
+            text = output.getvalue()
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("model: rule", text)
+            self.assertIn("ollama", text)
+
+    def test_chat_supports_registered_workflow_shortcuts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = StringIO()
+            with redirect_stdout(output), patch(
+                "builtins.input",
+                side_effect=["/release", "/exit"],
+            ):
+                exit_code = run_chat(
+                    [
+                        "--db",
+                        str(Path(tmp) / "agentic.db"),
+                        "--provider",
+                        "rule",
+                    ],
+                )
+            text = output.getvalue()
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("workflow active: /release", text)
 
     def test_voice_adapter_interface_can_be_mocked(self):
         browser = BrowserSpeechVoiceAdapter()

@@ -56,7 +56,8 @@ Test coverage includes:
 - Durable SQLite server sessions.
 - SQLite workflow event and tool/UI/rule/workflow registry persistence.
 - Rule context injection and safe write approval behavior.
-- Workflow presets, including `/search` requiring network tools.
+- Workflow presets, including `/search` requiring network tools and `/release`
+  enabling release-readiness framing.
 - Model/provider registry and per-request served model selection.
 - SSE event formatting.
 - Max-step stop condition.
@@ -101,6 +102,12 @@ scripts/test_package_install.sh
 The package builder emits `dist/agentic_loop-*-py3-none-any.whl` and
 `dist/agentic-loop-*.tar.gz` using only the Python standard library. The wheel
 is platform-independent for Linux and macOS.
+
+Ollama remains an optional system dependency, not a bundled Python dependency.
+Use `scripts/install.sh --with-ollama` for a smooth local-model install path
+that pulls the default model, or `scripts/install.sh --no-ollama` for API-only
+or deterministic rule-mode installs. The same script can be downloaded from
+GitHub and run with `bash -s --` flags for Miniconda-style bootstrap installs.
 
 ## Public Release Note
 

@@ -111,9 +111,11 @@ Run the same runtime behind HTTP for local apps and dashboards.
 ```bash
 python3 -m agentic_loop serve \
   --host 127.0.0.1 \
-  --port 8765 \
-  --enable-network-tools
+  --port 8765
 ```
+
+Served mode enables public web/news/fetch tools by default. Use
+`--disable-network-tools` for a narrower local service.
 
 Useful workflows:
 
@@ -138,7 +140,7 @@ Examples:
 - Network searches map to search/news result components.
 - Approval-required events can map to an approval modal.
 - `max_effort`, `academic`, `concise`, and `safe_writes` are toggleable rules.
-- `/loop` and `/search` are workflow presets.
+- `/loop`, `/search`, and `/release` are workflow presets.
 
 This lets a frontend render the same runtime events as a timeline, table
 preview, file browser, memory view, modal, rule toggle, or workflow button
@@ -181,6 +183,16 @@ python3 -m agentic_loop chat \
   --model gemma4:e4b \
   --enable-network-tools
 ```
+
+Or switch inside an interactive chat session:
+
+```text
+/models
+/model ollama qwen3.5:9b
+```
+
+Interactive chat defaults to Ollama `qwen3.5:9b`. The `rule` provider is still
+available for deterministic offline tests and demos.
 
 Served runs can choose the provider/model per request:
 

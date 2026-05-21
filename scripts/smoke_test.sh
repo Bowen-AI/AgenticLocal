@@ -93,7 +93,8 @@ CHAT_OUTPUT="$(
     "/exit" |
   python3 -m agentic_loop chat \
     --db "$CHAT_DB_FILE" \
-    --trace "$CHAT_TRACE_FILE"
+    --trace "$CHAT_TRACE_FILE" \
+    --provider rule
 )"
 echo "$CHAT_OUTPUT"
 printf '%s' "$CHAT_OUTPUT" | python3 -c '

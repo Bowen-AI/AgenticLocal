@@ -1,6 +1,15 @@
 import argparse
 
 from .factory import create_controller
+from .model_selection import (
+    DEFAULT_INTERACTIVE_MODEL,
+    DEFAULT_INTERACTIVE_PROVIDER,
+    DEFAULT_OLLAMA_HOST,
+    ModelSelection,
+    parse_model_command,
+    provider_registry,
+    render_model_selection,
+)
 from .session import AgentSession
 
 
@@ -10,10 +19,15 @@ HELP_TEXT = """Commands:
   /rules     Show rule toggles.
   /rule on KEY
   /rule off KEY
+  /models    Show model providers.
+  /model     Show current model.
+  /model PROVIDER MODEL
+  /model provider=PROVIDER model=MODEL [api_base=URL] [api_key=KEY]
   /workflows Show workflow presets.
   /workflow KEY
   /loop [goal]
   /search [query]
+  /release [goal]
   /history   Show the current session transcript.
   /exit      Quit.
 """
@@ -29,10 +43,10 @@ def run_chat(argv=None) -> int:
     parser.add_argument(
         "--provider",
         choices=["rule", "ollama", "openai", "openai-compatible", "gemini", "localai"],
-        default="rule",
+        default=DEFAULT_INTERACTIVE_PROVIDER,
     )
     parser.add_argument("--model", default=None)
-    parser.add_argument("--ollama-host", default="http://127.0.0.1:11434")
+    parser.add_argument("--ollama-host", default=DEFAULT_OLLAMA_HOST)
     parser.add_argument("--api-base", default=None)
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--write-root", action="append", default=[])
@@ -48,29 +62,46 @@ def run_chat(argv=None) -> int:
     args = parser.parse_args(argv)
 
     write_roots = ["outputs", *args.write_root]
-    controller = create_controller(
-        workspace=args.workspace,
-        memory_path=args.memory,
-        trace_path=args.trace,
-        db_path=args.db,
-        max_steps=args.max_steps,
+    model_name = args.model
+    if args.provider == DEFAULT_INTERACTIVE_PROVIDER and model_name is None:
+        model_name = DEFAULT_INTERACTIVE_MODEL
+    current_model = ModelSelection.from_values(
         provider=args.provider,
-        model_name=args.model,
+        model_name=model_name,
         ollama_host=args.ollama_host,
         api_base=args.api_base,
         api_key=args.api_key,
-        write_roots=write_roots,
-        approval_required_roots=args.approval_root,
-        enable_network_tools=args.enable_network_tools,
-        enabled_rule_keys=args.rule,
-        disabled_rule_keys=args.no_rule,
-        workflow_key=args.workflow,
     )
+
+    def make_controller(model_selection: ModelSelection):
+        return create_controller(
+            workspace=args.workspace,
+            memory_path=args.memory,
+            trace_path=args.trace,
+            db_path=args.db,
+            max_steps=args.max_steps,
+            provider=model_selection.provider,
+            model_name=model_selection.model_name,
+            ollama_host=model_selection.ollama_host or args.ollama_host,
+            api_base=model_selection.api_base,
+            api_key=model_selection.api_key,
+            write_roots=write_roots,
+            approval_required_roots=args.approval_root,
+            enable_network_tools=args.enable_network_tools,
+            enabled_rule_keys=args.rule,
+            disabled_rule_keys=args.no_rule,
+            workflow_key=args.workflow,
+        )
+
+    controller = make_controller(current_model)
     session = AgentSession(controller)
     current_workflow = args.workflow
 
     print("agentic-loop chat")
     print("Type /help for commands, /exit to quit.")
+    print(f"model: {render_model_selection(current_model)}")
+    if current_model.provider == "rule":
+        print("rule mode is deterministic/offline. Use /models and /model PROVIDER MODEL for a real chat model.")
 
     while True:
         try:
@@ -91,6 +122,29 @@ def run_chat(argv=None) -> int:
             continue
         if user_input == "/tools":
             print(", ".join(sorted(controller.tools.names())))
+            continue
+        if user_input == "/models":
+            _print_models()
+            continue
+        if user_input == "/model":
+            print(f"model: {render_model_selection(current_model)}")
+            continue
+        if user_input.startswith("/model "):
+            requested = user_input.split(maxsplit=1)[1].strip()
+            try:
+                current_model = parse_model_command(requested, fallback=current_model)
+                old_history = session.history
+                controller = make_controller(current_model)
+                session = AgentSession(
+                    controller,
+                    history=old_history,
+                    session_id=session.session_id,
+                    storage=session.storage,
+                )
+            except ValueError as exc:
+                print(f"model error: {exc}")
+                continue
+            print(f"model: {render_model_selection(current_model)}")
             continue
         if user_input == "/rules":
             _print_rules(controller)
@@ -114,33 +168,32 @@ def run_chat(argv=None) -> int:
             current_workflow = workflow.key
             print(f"workflow active: {workflow.command}")
             continue
-        if user_input == "/loop" or user_input.startswith("/loop "):
-            rest = user_input[len("/loop"):].strip()
+        shortcut = _workflow_shortcut(controller, user_input)
+        if shortcut is not None:
+            workflow, rest = shortcut
             if rest:
-                result = session.ask(rest, workflow_key="loop")
-                print(result.final_answer)
+                _ask_and_print(session, rest, workflow_key=workflow.key)
             else:
-                current_workflow = "loop"
-                print("workflow active: /loop")
-            continue
-        if user_input == "/search" or user_input.startswith("/search "):
-            rest = user_input[len("/search"):].strip()
-            if rest:
-                result = session.ask(rest, workflow_key="search")
-                print(result.final_answer)
-            else:
-                current_workflow = "search"
-                print("workflow active: /search")
+                current_workflow = workflow.key
+                print(f"workflow active: {workflow.command}")
             continue
         if user_input == "/history":
             for item in session.transcript():
                 print(f"{item['role']}: {item['content']}")
             continue
 
-        result = session.ask(user_input, workflow_key=current_workflow)
-        print(result.final_answer)
+        _ask_and_print(session, user_input, workflow_key=current_workflow)
 
     return 0
+
+
+def _ask_and_print(session: AgentSession, message: str, workflow_key: str | None = None) -> None:
+    try:
+        result = session.ask(message, workflow_key=workflow_key)
+    except Exception as exc:
+        print(f"model error: {exc}")
+        return
+    print(result.final_answer)
 
 
 def _print_rules(controller) -> None:
@@ -152,6 +205,24 @@ def _print_rules(controller) -> None:
 def _print_workflows(controller) -> None:
     for workflow in controller.rule_resolver.workflows():
         print(f"{workflow.command} - {workflow.description}")
+
+
+def _workflow_shortcut(controller, user_input: str):
+    command = user_input.split(maxsplit=1)[0]
+    if not command.startswith("/"):
+        return None
+    workflow = controller.rule_resolver.workflow(command)
+    if workflow is None or workflow.command != command:
+        return None
+    rest = user_input[len(command):].strip()
+    return workflow, rest
+
+
+def _print_models() -> None:
+    for item in provider_registry():
+        required = "model required" if item.get("model_required") else "model optional"
+        api_base = "api_base required" if item.get("api_base_required") else "api_base optional"
+        print(f"{item['provider']}: {required}, {api_base} - {item['description']}")
 
 
 def _handle_rule_command(controller, user_input: str) -> None:

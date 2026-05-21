@@ -151,6 +151,21 @@ DEFAULT_WORKFLOWS = [
             "or external information, then synthesize the result."
         ),
     ),
+    WorkflowDefinition(
+        key="release",
+        command="/release",
+        description="Prepare a release with checklist review, packaging awareness, and safe writes.",
+        rule_keys=("max_effort", "safe_writes"),
+        max_steps_override=14,
+        required_tools=("list_files", "read_file"),
+        prompt_prefix=(
+            "Workflow /release is active. Prepare a release deliberately: inspect the "
+            "release checklist, package metadata, tests, and docs that are available; "
+            "call out blockers clearly; use safe write behavior for any file changes; "
+            "and finish with release readiness, checks performed, and remaining manual "
+            "commands or approvals."
+        ),
+    ),
 ]
 
 

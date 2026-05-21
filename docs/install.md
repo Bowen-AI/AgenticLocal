@@ -13,7 +13,8 @@ or install the `agentic-loop` command in editable mode while developing.
 - Python 3.11 or newer.
 - A local checkout of this repository.
 - Optional: Ollama for local model runs.
-- Optional: network access when using `--enable-network-tools`.
+- Optional: network access for served web/news/fetch tools, or for chat and
+  one-shot runs started with `--enable-network-tools`.
 
 ## Run From Source
 
@@ -44,6 +45,23 @@ http://127.0.0.1:8765/voice
 
 ## Easy Install On Linux Or macOS
 
+Download the installer script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Bowen-AI/AgenticLocal/main/scripts/install.sh \
+  -o install-agentic-loop.sh
+bash install-agentic-loop.sh --with-ollama
+agentic-loop --version
+agentic-loop "Inspect data/sample.csv as a dataset."
+```
+
+Or pipe it directly into Bash:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Bowen-AI/AgenticLocal/main/scripts/install.sh \
+  | bash -s -- --with-ollama
+```
+
 From a local checkout:
 
 ```bash
@@ -55,6 +73,29 @@ agentic-loop "Inspect data/sample.csv as a dataset."
 The installer creates an isolated environment under
 `~/.local/share/agentic-loop` and writes a launcher to `~/.local/bin`. Add
 `~/.local/bin` to `PATH` if your shell does not already include it.
+
+Ollama is installed as a system application rather than a Python dependency.
+When `ollama` is missing, the installer prompts before running the official
+Ollama installer. When Ollama is available, it pulls the default model used by
+chat and serve unless you pass `--no-model-pull`:
+
+```bash
+# Prompt for Ollama setup.
+scripts/install.sh
+
+# Noninteractive local-model setup. This installs Ollama if missing and pulls
+# qwen3.5:9b by default.
+scripts/install.sh --with-ollama
+
+# Choose a different model, skip the model pull, or skip Ollama entirely.
+scripts/install.sh --ollama-model qwen3.5:9b
+scripts/install.sh --no-model-pull
+scripts/install.sh --no-ollama
+```
+
+The same behavior can be controlled with `AGENTIC_LOOP_INSTALL_OLLAMA`,
+`AGENTIC_LOOP_PULL_MODEL`, `AGENTIC_LOOP_OLLAMA_MODEL`, and
+`AGENTIC_LOOP_SOURCE_URL`.
 
 If Python venv/pip support is missing, install it and rerun the script:
 
@@ -161,15 +202,12 @@ Fetch https://example.com and summarize it.
 ## Ollama
 
 For local model runs, install Ollama separately and pull a tool-capable model.
-The runtime does not require Ollama by default; choose an Ollama model only when
-you use `--provider ollama`.
+Interactive chat and serve default to Ollama with `qwen3.5:9b`; use
+`--provider rule` when you want the dependency-free deterministic provider.
 
 ```bash
-ollama pull gemma4:e4b
-python3 -m agentic_loop chat \
-  --provider ollama \
-  --model gemma4:e4b \
-  --enable-network-tools
+ollama pull qwen3.5:9b
+python3 -m agentic_loop chat --enable-network-tools
 ```
 
 Check what Ollama has loaded:
@@ -189,9 +227,11 @@ Start the service:
 ```bash
 python3 -m agentic_loop serve \
   --host 127.0.0.1 \
-  --port 8765 \
-  --enable-network-tools
+  --port 8765
 ```
+
+The service enables public web/news/fetch tools by default. Add
+`--disable-network-tools` when you want the HTTP API to run without them.
 
 Call it:
 
@@ -243,6 +283,19 @@ Use the CLI against a running server:
 agentic-loop client --models
 agentic-loop client --provider ollama --model your-local-model "hello"
 ```
+
+Inside interactive chat:
+
+```text
+/models
+/model ollama qwen3.5:9b
+/model openai your-openai-model
+/model provider=openai-compatible model=your-model api_base=https://provider.example/v1 api_key=...
+```
+
+If you do not pass `--provider`, interactive chat starts with Ollama `qwen3.5:9b`.
+Use `--provider rule` when you want deterministic local smoke tests and tool
+demos without a model server.
 
 Useful endpoints:
 

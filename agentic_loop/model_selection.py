@@ -2,6 +2,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
+DEFAULT_INTERACTIVE_PROVIDER = "ollama"
+DEFAULT_INTERACTIVE_MODEL = "qwen3.5:9b"
+DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+
+
 PROVIDER_REGISTRY = [
     {
         "provider": "rule",
@@ -156,6 +161,47 @@ def provider_metadata(provider: str) -> dict[str, Any]:
 
 def provider_registry() -> list[dict[str, Any]]:
     return [dict(item) for item in PROVIDER_REGISTRY]
+
+
+def render_model_selection(selection: ModelSelection) -> str:
+    model = selection.model_name or "(none)"
+    return f"{selection.provider} {model}"
+
+
+def parse_model_command(value: str, fallback: ModelSelection | None = None) -> ModelSelection:
+    fallback = fallback or ModelSelection()
+    parts = value.split()
+    if not parts:
+        return fallback
+    data: dict[str, Any] = {}
+    positional = []
+    for part in parts:
+        if "=" in part:
+            key, item = part.split("=", 1)
+            data[key.strip().replace("-", "_")] = item.strip()
+        else:
+            positional.append(part)
+
+    if positional:
+        data.setdefault("provider", positional[0])
+    if len(positional) > 1:
+        data.setdefault("model", positional[1])
+
+    provider = data.get("provider", fallback.provider)
+    provider_changed = provider != fallback.provider
+    model_name = data.get("model", data.get("name"))
+    if model_name is None and not provider_changed:
+        model_name = fallback.model_name
+    if model_name is None and provider_changed and provider == DEFAULT_INTERACTIVE_PROVIDER:
+        model_name = DEFAULT_INTERACTIVE_MODEL
+
+    return ModelSelection.from_values(
+        provider=provider,
+        model_name=model_name,
+        ollama_host=data.get("ollama_host", fallback.ollama_host),
+        api_base=data.get("api_base", None if provider_changed else fallback.api_base),
+        api_key=data.get("api_key", None if provider_changed else fallback.api_key),
+    )
 
 
 def _blank_to_none(value: Any) -> str | None:

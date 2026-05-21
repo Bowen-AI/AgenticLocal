@@ -6,6 +6,14 @@ cd "$(dirname "$0")/.."
 echo "== syntax compile =="
 python3 -m compileall -q agentic_loop tests
 
+echo "== shell syntax =="
+bash -n \
+  scripts/check_release.sh \
+  scripts/install.sh \
+  scripts/package_release.sh \
+  scripts/smoke_test.sh \
+  scripts/test_package_install.sh
+
 echo "== unit tests =="
 python3 -m unittest discover -s tests -v
 

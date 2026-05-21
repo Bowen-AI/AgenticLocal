@@ -18,6 +18,44 @@ Start here:
 - [Example Screenshots](docs/example-screenshots.md)
 - [GitHub Pages Deploy](docs/github-pages.md)
 
+## Quick Install
+
+Install the `agentic-loop` command on Linux or macOS with the bootstrap script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Bowen-AI/AgenticLocal/main/scripts/install.sh \
+  -o install-agentic-loop.sh
+bash install-agentic-loop.sh --with-ollama
+agentic-loop --version
+```
+
+Or run it directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Bowen-AI/AgenticLocal/main/scripts/install.sh \
+  | bash -s -- --with-ollama
+```
+
+From a local checkout, use the same installer:
+
+```bash
+scripts/install.sh
+agentic-loop --version
+```
+
+The installer creates an isolated environment under
+`~/.local/share/agentic-loop`, writes a launcher to `~/.local/bin`, prompts for
+Ollama when it is missing, and pulls the default `qwen3.5:9b` model when
+Ollama is available. Use `--no-model-pull` to skip the model download.
+
+Common install modes:
+
+```bash
+scripts/install.sh --with-ollama
+scripts/install.sh --ollama-model qwen3.5:9b
+scripts/install.sh --no-ollama
+```
+
 ## Run The Demo
 
 Start an interactive agent chat:
@@ -26,7 +64,9 @@ Start an interactive agent chat:
 python3 -m agentic_loop chat
 ```
 
-Start interactive chat with opt-in public web/news tools:
+Interactive chat defaults to Ollama with `qwen3.5:9b`; run `ollama pull qwen3.5:9b`
+once if the model is not installed yet. Start it with opt-in public web/news
+tools:
 
 ```bash
 python3 -m agentic_loop chat --enable-network-tools
@@ -84,17 +124,18 @@ Start the local HTTP agent service:
 python3 -m agentic_loop serve --host 127.0.0.1 --port 8765
 ```
 
-The service starts with a default provider, but clients can choose provider and
-model per request or per session. The default is the dependency-free `rule`
-provider, so Ollama and API keys are optional.
+The service defaults to Ollama with `qwen3.5:9b`, but clients can choose provider and
+model per request or per session. Use `--provider rule` when you want the
+dependency-free deterministic provider.
 
-Expose public web/news tools in the local service:
+Public web/news/fetch tools are enabled by default for the local service. Start
+without those network tools when you want a narrower server:
 
 ```bash
 python3 -m agentic_loop serve \
   --host 127.0.0.1 \
   --port 8765 \
-  --enable-network-tools
+  --disable-network-tools
 ```
 
 Then open the embedded voice mode:
@@ -153,11 +194,16 @@ Rules and workflows can be listed from the CLI:
 ```bash
 python3 -m agentic_loop --rules
 python3 -m agentic_loop --workflows
+python3 -m agentic_loop --models
 python3 -m agentic_loop --workflow loop "Inspect data/sample.csv"
 python3 -m agentic_loop chat --enable-network-tools
 ```
 
-Inside chat, use `/rules`, `/rule on max_effort`, `/loop`, and `/search`.
+Inside chat, use `/rules`, `/rule on max_effort`, `/models`,
+`/model ollama qwen3.5:9b`, `/loop`, `/search`, and `/release`.
+
+When chat starts without `--provider`, it uses `--provider ollama --model qwen3.5:9b`.
+Use `--provider rule` for deterministic offline demos and tool-loop tests.
 
 ## Verification
 
@@ -251,6 +297,17 @@ The installer prefers an isolated venv under `~/.local/share/agentic-loop` and
 creates a launcher in `~/.local/bin`. If your system Python lacks venv/pip
 support, it prints the platform package to install.
 
+Ollama is a system application, not a Python wheel dependency. The installer
+will prompt to install Ollama when it is missing and pulls the default model
+when Ollama is available:
+
+```bash
+scripts/install.sh --with-ollama
+scripts/install.sh --ollama-model qwen3.5:9b
+scripts/install.sh --no-model-pull
+scripts/install.sh --no-ollama
+```
+
 Build release artifacts:
 
 ```bash
@@ -270,7 +327,7 @@ agentic-loop "Inspect data/sample.csv as a dataset."
 
 CI runs `scripts/check_release.sh` on Linux and macOS for Python 3.11 and 3.12.
 
-## Code Map
+## Components
 
 ```text
 agentic_loop/
@@ -295,11 +352,32 @@ agentic_loop/
   factory.py      # controller construction
 ```
 
+## System Diagram
+
+The main runtime shape is:
+
+```text
+User / UI
+  -> CLI, terminal chat, HTTP API, browser voice page
+  -> Agent Runtime
+       -> Context Builder
+       -> Model Adapter
+       -> Rule Resolver
+       -> Workspace Policy
+       -> Tool Registry
+       -> Event Logger
+       -> Evaluator
+  -> SQLite Storage
+       -> sessions, messages, memory, events, traces, registries
+  -> Workspace Files
+       -> read roots, write roots, approval-gated roots
+```
+
 ## Architecture Direction
 
 See [Architecture Decision](docs/architecture-decision.md).
 
-Current architecture:
+Detailed architecture:
 
 ```text
 User / UI

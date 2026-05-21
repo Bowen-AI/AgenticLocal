@@ -7,7 +7,13 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .factory import create_controller
-from .model_selection import ModelSelection, provider_registry
+from .model_selection import (
+    DEFAULT_INTERACTIVE_MODEL,
+    DEFAULT_INTERACTIVE_PROVIDER,
+    DEFAULT_OLLAMA_HOST,
+    ModelSelection,
+    provider_registry,
+)
 from .rules import RuleResolver
 from .session import AgentSession
 from .storage import SQLiteStore
@@ -295,7 +301,7 @@ class AgentServerApp:
             missing = ", ".join(missing_tools)
             raise ValueError(
                 f"Workflow {workflow.command} requires unavailable tool(s): {missing}. "
-                "Start with --enable-network-tools."
+                "Start the server with network tools enabled."
             )
         if session_id is None:
             session_id = self.create_session()
@@ -569,11 +575,15 @@ def serve(argv=None) -> int:
     parser.add_argument(
         "--provider",
         choices=["rule", "ollama", "openai", "openai-compatible", "gemini", "localai"],
-        default="rule",
+        default=DEFAULT_INTERACTIVE_PROVIDER,
         help="Default provider for requests that do not choose one.",
     )
-    parser.add_argument("--model", default=None, help="Default model for requests that do not choose one.")
-    parser.add_argument("--ollama-host", default="http://127.0.0.1:11434")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Default model for requests that do not choose one.",
+    )
+    parser.add_argument("--ollama-host", default=DEFAULT_OLLAMA_HOST)
     parser.add_argument("--api-base", default=None)
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--write-root", action="append", default=[])
@@ -581,11 +591,22 @@ def serve(argv=None) -> int:
     parser.add_argument(
         "--enable-network-tools",
         action="store_true",
-        help="Expose search_web, search_news, and fetch_url tools.",
+        dest="enable_network_tools",
+        default=True,
+        help="Expose search_web, search_news, and fetch_url tools. Enabled by default for serve.",
+    )
+    parser.add_argument(
+        "--disable-network-tools",
+        action="store_false",
+        dest="enable_network_tools",
+        help="Disable search_web, search_news, and fetch_url tools for the served API.",
     )
     args = parser.parse_args(argv)
 
     write_roots = ["outputs", *args.write_root]
+    model_name = args.model
+    if args.provider == DEFAULT_INTERACTIVE_PROVIDER and model_name is None:
+        model_name = DEFAULT_INTERACTIVE_MODEL
 
     app = AgentServerApp(
         workspace=args.workspace,
@@ -594,7 +615,7 @@ def serve(argv=None) -> int:
         db_path=args.db,
         max_steps=args.max_steps,
         provider=args.provider,
-        model_name=args.model,
+        model_name=model_name,
         ollama_host=args.ollama_host,
         api_base=args.api_base,
         api_key=args.api_key,
