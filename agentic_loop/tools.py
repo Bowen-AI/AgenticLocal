@@ -5,6 +5,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -213,6 +214,17 @@ def recall(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     query = arguments.get("query", "")
     records = context.memory.search(query) if query else context.memory.all()
     return {"records": [record.__dict__ for record in records]}
+
+
+def current_datetime(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now().astimezone()
+    return {
+        "iso": now.isoformat(timespec="seconds"),
+        "date": now.date().isoformat(),
+        "time": now.strftime("%H:%M:%S"),
+        "timezone": now.tzname() or "",
+        "weekday": now.strftime("%A"),
+    }
 
 
 def _web_client(context: ToolContext) -> WebClient:
@@ -456,6 +468,20 @@ def create_default_tools(enable_network: bool = False) -> ToolRegistry:
             handler=recall,
             risk_level="low",
             ui_component_hint="memory_view",
+        )
+    )
+    registry.register(
+        Tool(
+            name="current_datetime",
+            description="Return the current local date, time, weekday, and timezone.",
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+            handler=current_datetime,
+            risk_level="low",
+            ui_component_hint="status_banner",
         )
     )
     if enable_network:

@@ -41,13 +41,18 @@ class RuleBasedModel:
         state_summary: str,
     ) -> ModelResponse:
         goal = self._goal(messages)
+        normalized_goal = self._normalize(goal)
         tool_messages = [message for message in messages if message.role == "tool"]
         denied = [message for message in messages if "denied by policy" in message.content]
+        available_tools = {tool.get("name") for tool in tools}
 
         if denied:
             return ModelResponse.final(
                 "I could not complete that action because the policy layer denied it."
             )
+
+        if tool_messages:
+            return ModelResponse.final(self._final_from_tool(goal, tool_messages[-1]))
 
         if self._extract_url(goal) and not self._called(tool_messages, "fetch_url"):
             return ModelResponse.call(
@@ -56,34 +61,37 @@ class RuleBasedModel:
                 "call_fetch_url",
             )
 
-        if self._mentions(goal, "news", "headline", "headlines", "latest", "current events", "today") and not self._called(tool_messages, "search_news"):
+        if self._asks_for_news(normalized_goal) and not self._called(tool_messages, "search_news"):
             return ModelResponse.call(
                 "search_news",
-                {"query": self._search_query(goal), "max_results": 5},
+                {"query": self._search_query(normalized_goal), "max_results": 5},
                 "call_search_news",
             )
 
-        if self._mentions(goal, "search web", "search the web", "search internet", "search the internet", "web search", "internet search", "look up", "google") and not self._called(tool_messages, "search_web"):
+        if self._asks_for_web_search(normalized_goal) and not self._called(tool_messages, "search_web"):
             return ModelResponse.call(
                 "search_web",
-                {"query": self._search_query(goal), "max_results": 5},
+                {"query": self._search_query(normalized_goal), "max_results": 5},
                 "call_search_web",
             )
 
-        if self._mentions(goal, "remember") and not self._called(tool_messages, "remember"):
+        if self._asks_for_datetime(normalized_goal) and not self._called(tool_messages, "current_datetime"):
+            return ModelResponse.call("current_datetime", {}, "call_current_datetime")
+
+        if self._mentions(normalized_goal, "remember") and not self._called(tool_messages, "remember"):
             key, value = self._parse_memory_goal(goal)
             return ModelResponse.call("remember", {"key": key, "value": value}, "call_remember")
 
-        if self._mentions(goal, "recall", "what do you remember", "what is") and not self._called(tool_messages, "recall"):
+        if self._asks_for_memory(normalized_goal) and not self._called(tool_messages, "recall"):
             return ModelResponse.call("recall", {"query": self._memory_query(goal)}, "call_recall")
 
-        if self._mentions(goal, "inspect", "csv", "dataset") and not self._called(tool_messages, "inspect_csv"):
+        if self._mentions(normalized_goal, "inspect", "csv", "dataset") and not self._called(tool_messages, "inspect_csv"):
             return ModelResponse.call("inspect_csv", {"path": self._extract_path(goal, ".csv")}, "call_inspect")
 
-        if self._mentions(goal, "read") and not self._called(tool_messages, "read_file"):
+        if self._mentions(normalized_goal, "read") and not self._called(tool_messages, "read_file"):
             return ModelResponse.call("read_file", {"path": self._extract_path(goal, ".txt")}, "call_read")
 
-        if self._mentions(goal, "write", "save") and not self._called(tool_messages, "write_file"):
+        if self._mentions(normalized_goal, "write", "save") and not self._called(tool_messages, "write_file"):
             return ModelResponse.call(
                 "write_file",
                 {
@@ -93,15 +101,10 @@ class RuleBasedModel:
                 "call_write",
             )
 
-        if self._mentions(goal, "list", "files") and not self._called(tool_messages, "list_files"):
+        if self._mentions(normalized_goal, "list", "files") and not self._called(tool_messages, "list_files"):
             return ModelResponse.call("list_files", {"path": "."}, "call_list")
 
-        if tool_messages:
-            return ModelResponse.final(self._final_from_tool(goal, tool_messages[-1]))
-
-        return ModelResponse.final(
-            "I can answer directly, but I did not need any tools for this goal."
-        )
+        return ModelResponse.final(self._direct_answer(normalized_goal, available_tools))
 
     def _goal(self, messages: list[Message]) -> str:
         for message in reversed(messages):
@@ -112,6 +115,20 @@ class RuleBasedModel:
     def _mentions(self, text: str, *needles: str) -> bool:
         lower = text.lower()
         return any(needle in lower for needle in needles)
+
+    def _normalize(self, text: str) -> str:
+        normalized = text.lower().strip()
+        replacements = {
+            "teh": "the",
+            "thenews": "the news",
+            "isthe": "is the",
+            "todays": "today's",
+            "newstoday": "news today",
+        }
+        for old, new in replacements.items():
+            normalized = normalized.replace(old, new)
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized
 
     def _called(self, tool_messages: list[Message], name: str) -> bool:
         return any(message.name == name for message in tool_messages)
@@ -130,6 +147,11 @@ class RuleBasedModel:
     def _search_query(self, goal: str) -> str:
         query = goal
         removals = [
+            "what is the news today",
+            "what's the news today",
+            "what is the news",
+            "what's the news",
+            "the news today",
             "search the internet for",
             "search internet for",
             "search the web for",
@@ -143,7 +165,9 @@ class RuleBasedModel:
             "google",
             "latest news about",
             "news about",
+            "news today",
             "headlines about",
+            "news",
         ]
         lower = query.lower()
         for phrase in removals:
@@ -151,7 +175,43 @@ class RuleBasedModel:
                 index = lower.index(phrase)
                 query = query[:index] + query[index + len(phrase):]
                 lower = query.lower()
-        return query.strip(" :?.!") or goal
+        query = query.strip(" :?.!")
+        if not query:
+            return "top stories"
+        return query
+
+    def _asks_for_news(self, goal: str) -> bool:
+        return self._mentions(goal, "news", "headline", "headlines", "current events")
+
+    def _asks_for_web_search(self, goal: str) -> bool:
+        return self._mentions(
+            goal,
+            "search web",
+            "search the web",
+            "search internet",
+            "search the internet",
+            "web search",
+            "internet search",
+            "look up",
+            "google",
+        )
+
+    def _asks_for_datetime(self, goal: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(date|time|day|weekday|today|today's date|what day)\b",
+                goal,
+            )
+        )
+
+    def _asks_for_memory(self, goal: str) -> bool:
+        if self._mentions(goal, "recall", "what do you remember", "memory"):
+            return True
+        return self._mentions(goal, "what is") and self._mentions(
+            goal,
+            "project language",
+            "preference",
+        )
 
     def _parse_memory_goal(self, goal: str) -> tuple[str, str]:
         lower = goal.lower()
@@ -211,6 +271,12 @@ class RuleBasedModel:
             rendered = ", ".join(f"{item.get('key')}={item.get('value')}" for item in records)
             return f"I found memory: {rendered}."
 
+        if tool_message.name == "current_datetime":
+            return (
+                f"Today is {data.get('weekday')}, {data.get('date')}. "
+                f"The local time is {data.get('time')} {data.get('timezone')}."
+            )
+
         if tool_message.name in {"search_web", "search_news"}:
             results = data.get("results", [])
             if not results:
@@ -228,3 +294,18 @@ class RuleBasedModel:
             return f"I fetched {title}. Preview: {preview}"
 
         return f"Tool {tool_message.name} completed."
+
+    def _direct_answer(self, goal: str, available_tools: set[str]) -> str:
+        if goal in {"hello", "hi", "hey", "yo"}:
+            return (
+                "Hi. I can use tools for files, CSVs, memory, and date/time. "
+                "If you started chat with --enable-network-tools, I can also search web/news and fetch URLs."
+            )
+        if goal in {"what", "??", "?", "help"}:
+            tool_names = ", ".join(sorted(available_tools))
+            return f"Try asking me to use a tool. Available tools: {tool_names}."
+        return (
+            "I did not recognize a tool-oriented request. Try: "
+            "'list files', 'inspect data/sample.csv', 'what is today's date', "
+            "'search news about AI', or 'fetch https://example.com'."
+        )

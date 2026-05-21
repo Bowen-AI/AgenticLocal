@@ -284,6 +284,20 @@ class AgenticLoopTest(unittest.TestCase):
             self.assertEqual(len(session.transcript()), 6)
             self.assertEqual(session.transcript()[0]["role"], "user")
 
+    def test_direct_chat_is_more_helpful(self):
+        hello = self.make_controller().run("hello")
+        vague = self.make_controller().run("??")
+
+        self.assertIn("Hi.", hello.final_answer)
+        self.assertIn("Available tools", vague.final_answer)
+
+    def test_agent_answers_current_date_through_tool(self):
+        result = self.make_controller().run("what is today's date")
+
+        self.assertEqual(result.state.steps[0].tool_name, "current_datetime")
+        self.assertIn("Today is", result.final_answer)
+        self.assertIn("date", result.state.steps[0].observation)
+
     def test_max_step_stop_condition(self):
         model = ScriptedModel(
             [
@@ -436,15 +450,22 @@ class AgenticLoopTest(unittest.TestCase):
         result = self.make_network_controller().run("Search news about agentic AI.")
 
         self.assertEqual(result.state.steps[0].tool_name, "search_news")
-        self.assertEqual(result.state.steps[0].observation["query"], "agentic AI")
+        self.assertEqual(result.state.steps[0].observation["query"], "agentic ai")
         self.assertIn("Example News", json.dumps(result.state.steps[0].observation))
+        self.assertIn("Google News RSS", result.final_answer)
+
+    def test_interactive_planner_handles_news_typos(self):
+        result = self.make_network_controller().run("what is thenews today")
+
+        self.assertEqual(result.state.steps[0].tool_name, "search_news")
+        self.assertEqual(result.state.steps[0].observation["query"], "top stories")
         self.assertIn("Google News RSS", result.final_answer)
 
     def test_interactive_planner_can_search_web(self):
         result = self.make_network_controller().run("Search the internet for agentic AI.")
 
         self.assertEqual(result.state.steps[0].tool_name, "search_web")
-        self.assertEqual(result.state.steps[0].observation["query"], "agentic AI")
+        self.assertEqual(result.state.steps[0].observation["query"], "agentic ai")
         self.assertIn("Agentic AI", result.final_answer)
 
     def test_voice_page_embeds_chat_voice_controls(self):

@@ -120,6 +120,7 @@ class WorkspacePolicy:
             "inspect_csv",
             "remember",
             "recall",
+            "current_datetime",
             "search_web",
             "search_news",
             "fetch_url",
