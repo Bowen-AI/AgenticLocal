@@ -9,7 +9,7 @@ from .logs import JsonlTraceLogger
 from .memory import MemoryStore
 from .model import AgentModel
 from .policy import WorkspacePolicy
-from .tools import ToolContext, ToolRegistry, serialize_tool_result
+from .tools import ToolContext, ToolRegistry, WebClient, serialize_tool_result
 from .types import AgentState, AgentStep, Message
 
 
@@ -33,6 +33,7 @@ class AgentController:
         logger: JsonlTraceLogger | None = None,
         max_steps: int = 8,
         storage: Any = None,
+        web_client: WebClient | None = None,
     ):
         self.model = model
         self.tools = tools
@@ -44,6 +45,7 @@ class AgentController:
         self.max_steps = max_steps
         self.evaluator = BasicEvaluator(self.workspace_root)
         self.storage = storage
+        self.web_client = web_client
 
     def run(
         self,
@@ -55,7 +57,11 @@ class AgentController:
         run_id = run_id or uuid.uuid4().hex
         state = AgentState(goal=goal)
         messages = self.context_builder.initial_messages(goal, prior_messages)
-        tool_context = ToolContext(workspace_root=self.workspace_root, memory=self.memory)
+        tool_context = ToolContext(
+            workspace_root=self.workspace_root,
+            memory=self.memory,
+            web_client=self.web_client,
+        )
 
         self.logger.log(
             "run_started",

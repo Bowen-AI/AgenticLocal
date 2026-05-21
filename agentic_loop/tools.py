@@ -1,16 +1,45 @@
 import csv
 import json
+import re
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from .memory import MemoryStore
+
+
+class WebClient(Protocol):
+    def get_json(self, url: str, timeout_s: float = 10.0) -> Any:
+        ...
+
+    def get_text(self, url: str, timeout_s: float = 10.0) -> str:
+        ...
+
+
+class UrllibWebClient:
+    def get_json(self, url: str, timeout_s: float = 10.0) -> Any:
+        text = self.get_text(url, timeout_s=timeout_s)
+        return json.loads(text)
+
+    def get_text(self, url: str, timeout_s: float = 10.0) -> str:
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "agentic-loop/0.1"},
+            method="GET",
+        )
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            content_type = response.headers.get_content_charset() or "utf-8"
+            return response.read().decode(content_type, errors="replace")
 
 
 @dataclass
 class ToolContext:
     workspace_root: Path
     memory: MemoryStore | None = None
+    web_client: WebClient | None = None
 
 
 ToolHandler = Callable[[ToolContext, dict[str, Any]], Any]
@@ -186,7 +215,155 @@ def recall(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     return {"records": [record.__dict__ for record in records]}
 
 
-def create_default_tools() -> ToolRegistry:
+def _web_client(context: ToolContext) -> WebClient:
+    return context.web_client or UrllibWebClient()
+
+
+def _max_results(arguments: dict[str, Any], default: int = 5) -> int:
+    return max(1, min(int(arguments.get("max_results", default)), 10))
+
+
+def _flatten_duckduckgo_topics(topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results = []
+    for item in topics:
+        if "Topics" in item:
+            results.extend(_flatten_duckduckgo_topics(item.get("Topics") or []))
+            continue
+        title = item.get("Text") or item.get("FirstURL") or "Untitled result"
+        results.append(
+            {
+                "title": str(title).split(" - ")[0],
+                "url": item.get("FirstURL") or "",
+                "snippet": item.get("Text") or "",
+            }
+        )
+    return results
+
+
+def _strip_html(value: str) -> str:
+    value = re.sub(r"<[^>]+>", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _duckduckgo_result_url(value: str) -> str:
+    parsed = urllib.parse.urlparse(value)
+    query = urllib.parse.parse_qs(parsed.query)
+    if "uddg" in query:
+        return query["uddg"][0]
+    return value
+
+
+def _search_duckduckgo_html(context: ToolContext, query: str, max_results: int) -> list[dict[str, Any]]:
+    url = "https://duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query})
+    html = _web_client(context).get_text(url)
+    matches = re.findall(
+        r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    snippets = re.findall(
+        r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>|<div[^>]+class="result__snippet"[^>]*>(.*?)</div>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    snippet_text = [_strip_html(left or right) for left, right in snippets]
+    results = []
+    for index, (href, title) in enumerate(matches[:max_results]):
+        results.append(
+            {
+                "title": _strip_html(title),
+                "url": _duckduckgo_result_url(href),
+                "snippet": snippet_text[index] if index < len(snippet_text) else "",
+            }
+        )
+    return results
+
+
+def search_web(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    query = arguments["query"].strip()
+    if not query:
+        raise ValueError("search_web requires a non-empty query")
+    max_results = _max_results(arguments)
+    url = "https://api.duckduckgo.com/?" + urllib.parse.urlencode(
+        {
+            "q": query,
+            "format": "json",
+            "no_html": "1",
+            "skip_disambig": "1",
+        }
+    )
+    data = _web_client(context).get_json(url)
+    results = []
+    if data.get("AbstractText"):
+        results.append(
+            {
+                "title": data.get("Heading") or query,
+                "url": data.get("AbstractURL") or data.get("AbstractSource") or "",
+                "snippet": data.get("AbstractText") or "",
+            }
+        )
+    results.extend(_flatten_duckduckgo_topics(data.get("RelatedTopics") or []))
+    if not results:
+        results = _search_duckduckgo_html(context, query, max_results)
+    return {
+        "query": query,
+        "source": "DuckDuckGo",
+        "results": results[:max_results],
+        "result_count": min(len(results), max_results),
+    }
+
+
+def search_news(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    query = arguments["query"].strip()
+    if not query:
+        raise ValueError("search_news requires a non-empty query")
+    max_results = _max_results(arguments)
+    url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
+        {"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"}
+    )
+    text = _web_client(context).get_text(url)
+    root = ET.fromstring(text)
+    results = []
+    for item in root.findall("./channel/item")[:max_results]:
+        source = item.find("source")
+        results.append(
+            {
+                "title": item.findtext("title", default=""),
+                "url": item.findtext("link", default=""),
+                "published": item.findtext("pubDate", default=""),
+                "source": source.text if source is not None else "",
+            }
+        )
+    return {
+        "query": query,
+        "source": "Google News RSS",
+        "results": results,
+        "result_count": len(results),
+    }
+
+
+def fetch_url(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    url = arguments["url"].strip()
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("fetch_url only supports http and https URLs")
+    max_chars = int(arguments.get("max_chars", 12000))
+    text = _web_client(context).get_text(url)
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", text, flags=re.IGNORECASE | re.DOTALL)
+    title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else ""
+    body = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    body = re.sub(r"<[^>]+>", " ", body)
+    body = re.sub(r"\s+", " ", body).strip()
+    content = body[:max_chars]
+    return {
+        "url": url,
+        "title": title,
+        "content": content,
+        "truncated": len(body) > max_chars,
+    }
+
+
+def create_default_tools(enable_network: bool = False) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
         Tool(
@@ -281,6 +458,61 @@ def create_default_tools() -> ToolRegistry:
             ui_component_hint="memory_view",
         )
     )
+    if enable_network:
+        registry.register(
+            Tool(
+                name="search_web",
+                description="Search the public web for general information.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "max_results": {"type": "integer", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+                handler=search_web,
+                source="network",
+                risk_level="medium",
+                ui_component_hint="search_results",
+            )
+        )
+        registry.register(
+            Tool(
+                name="search_news",
+                description="Search current news headlines for a query.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "max_results": {"type": "integer", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+                handler=search_news,
+                source="network",
+                risk_level="medium",
+                ui_component_hint="news_results",
+            )
+        )
+        registry.register(
+            Tool(
+                name="fetch_url",
+                description="Fetch and summarize text from a public HTTP or HTTPS URL.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "max_chars": {"type": "integer", "default": 12000},
+                    },
+                    "required": ["url"],
+                },
+                handler=fetch_url,
+                source="network",
+                risk_level="medium",
+                ui_component_hint="web_page",
+            )
+        )
     return registry
 
 

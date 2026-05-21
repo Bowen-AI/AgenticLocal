@@ -30,6 +30,11 @@ def run_chat(argv=None) -> int:
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--write-root", action="append", default=[])
     parser.add_argument("--approval-root", action="append", default=[])
+    parser.add_argument(
+        "--enable-network-tools",
+        action="store_true",
+        help="Expose search_web, search_news, and fetch_url tools.",
+    )
     args = parser.parse_args(argv)
 
     write_roots = ["outputs", *args.write_root]
@@ -46,6 +51,7 @@ def run_chat(argv=None) -> int:
         api_key=args.api_key,
         write_roots=write_roots,
         approval_required_roots=args.approval_root,
+        enable_network_tools=args.enable_network_tools,
     )
     session = AgentSession(controller)
 

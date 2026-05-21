@@ -21,6 +21,20 @@ Start an interactive agent chat:
 python3 -m agentic_loop chat
 ```
 
+Start interactive chat with opt-in public web/news tools:
+
+```bash
+python3 -m agentic_loop chat --enable-network-tools
+```
+
+Then try:
+
+```text
+Search the internet for agentic AI.
+Search news about robotics.
+Fetch https://example.com and summarize it.
+```
+
 List files through the agent loop:
 
 ```bash
@@ -63,6 +77,15 @@ Start the local HTTP agent service:
 
 ```bash
 python3 -m agentic_loop serve --host 127.0.0.1 --port 8765
+```
+
+Expose public web/news tools in the local service:
+
+```bash
+python3 -m agentic_loop serve \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --enable-network-tools
 ```
 
 Then open the embedded voice mode:
@@ -146,6 +169,7 @@ Current coverage checks:
 
 - loop/controller execution
 - tool calls
+- opt-in public web/news/fetch tools
 - workspace policy enforcement
 - denied unsafe reads/writes
 - configurable write roots

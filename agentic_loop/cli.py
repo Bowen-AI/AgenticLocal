@@ -37,6 +37,11 @@ def main(argv=None) -> int:
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--write-root", action="append", default=[])
     parser.add_argument("--approval-root", action="append", default=[])
+    parser.add_argument(
+        "--enable-network-tools",
+        action="store_true",
+        help="Expose search_web, search_news, and fetch_url tools.",
+    )
     parser.add_argument("--json", action="store_true", help="Print structured result JSON.")
     parser.add_argument(
         "--scripted-tool-call",
@@ -82,6 +87,7 @@ def main(argv=None) -> int:
         api_key=args.api_key,
         write_roots=write_roots,
         approval_required_roots=args.approval_root,
+        enable_network_tools=args.enable_network_tools,
     )
     result = controller.run(args.goal)
 

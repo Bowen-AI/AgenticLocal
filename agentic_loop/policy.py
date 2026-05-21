@@ -120,6 +120,9 @@ class WorkspacePolicy:
             "inspect_csv",
             "remember",
             "recall",
+            "search_web",
+            "search_news",
+            "fetch_url",
         }
         if write_roots is None and outputs_dir_name != "outputs":
             write_roots = (outputs_dir_name,)

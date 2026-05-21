@@ -32,6 +32,7 @@ Test coverage includes:
 
 - Agent loop/controller behavior.
 - Tool calls.
+- Opt-in network tools for web search, news search, and URL fetch.
 - CSV inspection.
 - Workspace read policy.
 - Workspace write policy.

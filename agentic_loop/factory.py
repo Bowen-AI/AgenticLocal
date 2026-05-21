@@ -9,7 +9,7 @@ from .policy import WorkspaceAccessConfig, WorkspacePolicy
 from .providers.localai import LocalAIChatModel
 from .providers.openai_compatible import OpenAICompatibleChatModel
 from .storage import SQLiteStore
-from .tools import create_default_tools
+from .tools import WebClient, create_default_tools
 
 
 def create_controller(
@@ -28,9 +28,11 @@ def create_controller(
     write_roots: list[str | Path] | tuple[str | Path, ...] | None = None,
     approval_required_roots: list[str | Path] | tuple[str | Path, ...] | None = None,
     storage: SQLiteStore | None = None,
+    enable_network_tools: bool = False,
+    web_client: WebClient | None = None,
 ) -> AgentController:
     workspace_path = Path(workspace)
-    registry = create_default_tools()
+    registry = create_default_tools(enable_network=enable_network_tools)
     selected_storage = storage
     if selected_storage is None and db_path is not None:
         selected_storage = SQLiteStore(db_path)
@@ -82,4 +84,5 @@ def create_controller(
         logger=logger,
         max_steps=max_steps,
         storage=selected_storage,
+        web_client=web_client,
     )

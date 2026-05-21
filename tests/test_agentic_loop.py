@@ -22,11 +22,40 @@ from agentic_loop import (
 from agentic_loop.ollama_model import OllamaChatModel
 from agentic_loop.factory import create_controller
 from agentic_loop.server import AgentServerApp, format_sse_events
+from agentic_loop.tools import ToolContext
 from agentic_loop.voice import voice_page_html
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_WORKSPACE = REPO_ROOT / "sample_workspace"
+
+
+class FakeWebClient:
+    def get_json(self, url, timeout_s=10.0):
+        return {
+            "Heading": "Agentic AI",
+            "AbstractText": "Agentic AI systems can use tools to complete tasks.",
+            "AbstractURL": "https://example.test/agentic-ai",
+            "RelatedTopics": [
+                {
+                    "Text": "Tool use - Models can request runtime tools.",
+                    "FirstURL": "https://example.test/tool-use",
+                }
+            ],
+        }
+
+    def get_text(self, url, timeout_s=10.0):
+        if "news.google.com" in url:
+            return """<?xml version="1.0" encoding="UTF-8"?>
+            <rss><channel>
+              <item>
+                <title>Agentic AI project launches local runtime</title>
+                <link>https://news.example.test/local-runtime</link>
+                <pubDate>Thu, 21 May 2026 10:00:00 GMT</pubDate>
+                <source>Example News</source>
+              </item>
+            </channel></rss>"""
+        return "<html><head><title>Example Page</title></head><body>Hello from a fetched page.</body></html>"
 
 
 class AgenticLoopTest(unittest.TestCase):
@@ -39,6 +68,17 @@ class AgenticLoopTest(unittest.TestCase):
             workspace_root=workspace,
             memory=memory,
             max_steps=max_steps,
+        )
+
+    def make_network_controller(self, model=None, workspace=None, max_steps=8):
+        workspace = Path(workspace or SAMPLE_WORKSPACE)
+        return AgentController(
+            model=model or RuleBasedModel(),
+            tools=create_default_tools(enable_network=True),
+            policy=WorkspacePolicy(workspace),
+            workspace_root=workspace,
+            max_steps=max_steps,
+            web_client=FakeWebClient(),
         )
 
     def make_controller_with_policy(
@@ -375,6 +415,37 @@ class AgenticLoopTest(unittest.TestCase):
         self.assertIsInstance(browser, VoiceAdapter)
         self.assertFalse(browser.describe().realtime)
         self.assertTrue(realtime.describe().realtime)
+
+    def test_network_tools_are_opt_in(self):
+        self.assertNotIn("search_web", create_default_tools().names())
+        self.assertIn("search_web", create_default_tools(enable_network=True).names())
+
+    def test_network_tool_handlers_parse_results(self):
+        tools = create_default_tools(enable_network=True)
+        context = ToolContext(workspace_root=SAMPLE_WORKSPACE, web_client=FakeWebClient())
+
+        web = tools.run("search_web", context, {"query": "agentic ai"})
+        news = tools.run("search_news", context, {"query": "agentic ai"})
+        page = tools.run("fetch_url", context, {"url": "https://example.test/page"})
+
+        self.assertEqual(web["results"][0]["title"], "Agentic AI")
+        self.assertEqual(news["results"][0]["source"], "Example News")
+        self.assertEqual(page["title"], "Example Page")
+
+    def test_interactive_planner_can_search_news(self):
+        result = self.make_network_controller().run("Search news about agentic AI.")
+
+        self.assertEqual(result.state.steps[0].tool_name, "search_news")
+        self.assertEqual(result.state.steps[0].observation["query"], "agentic AI")
+        self.assertIn("Example News", json.dumps(result.state.steps[0].observation))
+        self.assertIn("Google News RSS", result.final_answer)
+
+    def test_interactive_planner_can_search_web(self):
+        result = self.make_network_controller().run("Search the internet for agentic AI.")
+
+        self.assertEqual(result.state.steps[0].tool_name, "search_web")
+        self.assertEqual(result.state.steps[0].observation["query"], "agentic AI")
+        self.assertIn("Agentic AI", result.final_answer)
 
     def test_voice_page_embeds_chat_voice_controls(self):
         html = voice_page_html("0.1.0")

@@ -49,6 +49,27 @@ class RuleBasedModel:
                 "I could not complete that action because the policy layer denied it."
             )
 
+        if self._extract_url(goal) and not self._called(tool_messages, "fetch_url"):
+            return ModelResponse.call(
+                "fetch_url",
+                {"url": self._extract_url(goal), "max_chars": 4000},
+                "call_fetch_url",
+            )
+
+        if self._mentions(goal, "news", "headline", "headlines", "latest", "current events", "today") and not self._called(tool_messages, "search_news"):
+            return ModelResponse.call(
+                "search_news",
+                {"query": self._search_query(goal), "max_results": 5},
+                "call_search_news",
+            )
+
+        if self._mentions(goal, "search web", "search the web", "search internet", "search the internet", "web search", "internet search", "look up", "google") and not self._called(tool_messages, "search_web"):
+            return ModelResponse.call(
+                "search_web",
+                {"query": self._search_query(goal), "max_results": 5},
+                "call_search_web",
+            )
+
         if self._mentions(goal, "remember") and not self._called(tool_messages, "remember"):
             key, value = self._parse_memory_goal(goal)
             return ModelResponse.call("remember", {"key": key, "value": value}, "call_remember")
@@ -101,6 +122,36 @@ class RuleBasedModel:
             if token.endswith(suffix) or "/" in token:
                 return token
         return "data/sample.csv" if suffix == ".csv" else "notes/example.txt"
+
+    def _extract_url(self, goal: str) -> str | None:
+        match = re.search(r"https?://[^\s)>\"]+", goal)
+        return match.group(0).rstrip(".,;!?") if match else None
+
+    def _search_query(self, goal: str) -> str:
+        query = goal
+        removals = [
+            "search the internet for",
+            "search internet for",
+            "search the web for",
+            "search web for",
+            "search latest news about",
+            "search news about",
+            "search news for",
+            "web search for",
+            "internet search for",
+            "look up",
+            "google",
+            "latest news about",
+            "news about",
+            "headlines about",
+        ]
+        lower = query.lower()
+        for phrase in removals:
+            if phrase in lower:
+                index = lower.index(phrase)
+                query = query[:index] + query[index + len(phrase):]
+                lower = query.lower()
+        return query.strip(" :?.!") or goal
 
     def _parse_memory_goal(self, goal: str) -> tuple[str, str]:
         lower = goal.lower()
@@ -159,5 +210,21 @@ class RuleBasedModel:
                 return "I did not find matching memory."
             rendered = ", ".join(f"{item.get('key')}={item.get('value')}" for item in records)
             return f"I found memory: {rendered}."
+
+        if tool_message.name in {"search_web", "search_news"}:
+            results = data.get("results", [])
+            if not results:
+                return f"I did not find results for {data.get('query')}."
+            rendered = "; ".join(
+                f"{index}. {item.get('title')}"
+                for index, item in enumerate(results[:3], start=1)
+            )
+            return f"I found {len(results)} result(s) from {data.get('source')}: {rendered}."
+
+        if tool_message.name == "fetch_url":
+            title = data.get("title") or data.get("url")
+            content = data.get("content", "")
+            preview = content[:180].strip()
+            return f"I fetched {title}. Preview: {preview}"
 
         return f"Tool {tool_message.name} completed."

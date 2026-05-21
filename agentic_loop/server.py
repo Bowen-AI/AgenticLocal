@@ -48,6 +48,7 @@ class AgentServerApp:
         write_roots: list[str] | None = None,
         approval_required_roots: list[str] | None = None,
         storage: SQLiteStore | None = None,
+        enable_network_tools: bool = False,
     ):
         self.workspace = workspace
         self.memory_path = memory_path
@@ -62,9 +63,12 @@ class AgentServerApp:
         self.read_roots = read_roots
         self.write_roots = write_roots
         self.approval_required_roots = approval_required_roots
+        self.enable_network_tools = enable_network_tools
         self.storage = storage or SQLiteStore(db_path or ".agentic/agentic.db")
         self.sessions: dict[str, AgentSession] = {}
-        self.storage.seed_tool_registry(create_default_tools().metadata())
+        self.storage.seed_tool_registry(
+            create_default_tools(enable_network=enable_network_tools).metadata()
+        )
         self.storage.seed_default_ui_registry()
 
     def create_session(self) -> str:
@@ -101,6 +105,7 @@ class AgentServerApp:
             write_roots=self.write_roots,
             approval_required_roots=self.approval_required_roots,
             storage=self.storage,
+            enable_network_tools=self.enable_network_tools,
         )
 
     def _make_session(self, session_id: str, history: list[Message]) -> AgentSession:
@@ -167,7 +172,10 @@ def make_handler(app: AgentServerApp):
             if parsed.path == "/tools":
                 self._send_json(
                     {
-                        "tools": create_default_tools().schemas(),
+                        "tools": create_default_tools(
+                            enable_network=app.enable_network_tools
+                        ).schemas(),
+                        "network_tools_enabled": app.enable_network_tools,
                         "registry": app.tool_registry(),
                     }
                 )
@@ -305,6 +313,11 @@ def serve(argv=None) -> int:
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--write-root", action="append", default=[])
     parser.add_argument("--approval-root", action="append", default=[])
+    parser.add_argument(
+        "--enable-network-tools",
+        action="store_true",
+        help="Expose search_web, search_news, and fetch_url tools.",
+    )
     args = parser.parse_args(argv)
 
     write_roots = ["outputs", *args.write_root]
@@ -322,6 +335,7 @@ def serve(argv=None) -> int:
         api_key=args.api_key,
         write_roots=write_roots,
         approval_required_roots=args.approval_root,
+        enable_network_tools=args.enable_network_tools,
     )
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     print(f"agentic-loop serving on http://{args.host}:{args.port}")
