@@ -46,6 +46,7 @@ class ModelResponse:
 class PolicyDecision:
     allowed: bool
     reason: str = ""
+    requires_approval: bool = False
 
 
 @dataclass
@@ -87,4 +88,3 @@ class AgentState:
             else:
                 lines.append(f"{step.index}. {step.action}")
         return "\n".join(lines)
-

@@ -33,10 +33,18 @@ Inspect a CSV through a tool call:
 python3 -m agentic_loop "Inspect data/sample.csv as a dataset."
 ```
 
-Write only to the allowed `outputs/` folder:
+Write to the default configured `outputs/` write root:
 
 ```bash
 python3 -m agentic_loop "Write a note saying hello from the agent."
+```
+
+Add another named write root:
+
+```bash
+python3 -m agentic_loop \
+  --write-root drafts \
+  "Save a draft note."
 ```
 
 Return structured JSON:
@@ -67,10 +75,24 @@ Or call it from another terminal:
 
 ```bash
 curl -s http://127.0.0.1:8765/health
+curl -s http://127.0.0.1:8765/events
+curl -N "http://127.0.0.1:8765/events?follow=1&timeout=30"
+curl -s http://127.0.0.1:8765/memory
 curl -s -X POST http://127.0.0.1:8765/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"Inspect data/sample.csv as a dataset."}'
 ```
+
+By default, durable app state is stored in:
+
+```text
+.agentic/agentic.db
+```
+
+That SQLite database stores sessions, messages, run steps, long-term memory,
+events/traces, tool registry metadata, and UI registry metadata. JSONL memory
+and trace files are still available as optional legacy/export paths through
+`--memory` and `--trace`.
 
 ## Verification
 
@@ -103,6 +125,17 @@ Run the full smoke test, including unit tests and real CLI executions:
 scripts/smoke_test.sh
 ```
 
+Run the richer end-to-end showcase:
+
+```bash
+python3 scripts/showcase_e2e.py
+```
+
+This demonstrates CLI runs, SQLite memory across processes, configurable write
+roots, approval-required roots, HTTP chat, durable API views, registries, SSE
+events, and provider/voice adapter boundaries. It starts a local loopback HTTP
+server for the HTTP/SSE section.
+
 Run only the unit tests:
 
 ```bash
@@ -115,11 +148,19 @@ Current coverage checks:
 - tool calls
 - workspace policy enforcement
 - denied unsafe reads/writes
+- configurable write roots
+- approval-required write roots
 - interactive chat session state
-- JSONL memory remember/recall
+- SQLite memory remember/recall
+- durable server sessions
+- persisted workflow events
+- tool/UI registry metadata
+- SSE event formatting
 - CSV inspection
 - max-step stopping
 - structured result shape
+- provider adapter selection
+- voice adapter interface
 - Ollama adapter parsing/fallback behavior
 
 ## Package
@@ -146,10 +187,12 @@ agentic_loop/
   controller.py  # loop
   model.py       # model interface, scripted model, deterministic demo model
   ollama_model.py # Ollama chat adapter
+  providers/     # OpenAI-compatible and LocalAI adapter scaffolding
   tools.py       # tool schemas and implementations
   policy.py      # permissions
   context.py     # context construction
   memory.py      # JSONL long-term memory
+  storage.py     # SQLite sessions, events, memory, traces, registries
   state.py       # agent state
   evals.py       # completion/safety evaluation
   logs.py        # JSONL traces
@@ -157,6 +200,7 @@ agentic_loop/
   chat.py        # interactive terminal chat
   server.py      # local HTTP service
   voice.py       # embedded browser voice page
+  voice_adapters.py # provider-neutral voice adapter interfaces
   session.py     # multi-turn chat sessions
   factory.py      # controller construction
 ```
@@ -164,6 +208,83 @@ agentic_loop/
 ## Architecture Direction
 
 See [Architecture Decision](docs/architecture-decision.md).
+
+Current architecture:
+
+```text
+User / UI
+  -> Terminal chat, HTTP chat, browser voice page, tool timeline
+
+HTTP API
+  -> POST /chat
+  -> POST /run
+  -> GET /events        SSE event stream snapshot
+  -> GET /events?follow=1&timeout=30
+  -> GET /tools         tool schemas + registry metadata
+  -> GET /memory        long-term memory records
+  -> GET /sessions      durable session list
+  -> GET /registry/ui   UI component registry metadata
+
+Agent Runtime
+  -> Context Builder
+  -> Brain / Model Adapter
+       - Rule model
+       - Ollama
+       - OpenAI-compatible
+       - LocalAI
+       - other provider API keys through the adapter boundary
+  -> Policy / Approval Engine
+       - configured read roots
+       - configured write roots
+       - approval-required roots
+       - symlink/path escape checks
+  -> Tool Registry
+       - local file tools
+       - CSV inspection
+       - memory tools
+       - future web, paper, dataset, MCP tools
+  -> Event Logger
+  -> Evaluator
+
+Storage
+  -> SQLite .agentic/agentic.db
+       - sessions + messages
+       - working state + steps
+       - long-term memory
+       - tool registry metadata
+       - UI registry metadata
+       - traces/events
+  -> Workspace files
+       - configured read roots
+       - configured write roots
+       - approval-gated risky roots
+
+Voice
+  -> Browser Web Speech pipeline now
+  -> VoiceAdapter interface for realtime providers later
+       - Gemini Live Voice example
+       - OpenAI Realtime example
+       - same policy/tools/memory/runtime underneath
+```
+
+Memory/state split:
+
+```text
+Short-term context
+  Prompt messages sent to the model on the current turn.
+
+Working memory
+  AgentState and step/task state for the current run.
+
+Session memory
+  Conversation transcript persisted by session_id in SQLite.
+
+Long-term memory
+  Deliberate remember/recall facts persisted across sessions.
+
+Retrieval memory
+  Future searchable project/code/docs chunks, separate from long-term facts.
+```
 
 Related notes:
 

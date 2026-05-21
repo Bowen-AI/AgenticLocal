@@ -75,6 +75,7 @@ Implemented:
 Not implemented:
 
 - OpenAI Realtime speech-to-speech sessions.
+- Gemini Live Voice sessions.
 - Server-side audio transcription.
 - Server-side text-to-speech.
 - Full barge-in/interruption management beyond browser speech controls.
@@ -82,11 +83,11 @@ Not implemented:
 ## Recommended Next Build Order
 
 1. Keep the existing `agentic_loop` text session as the core workflow.
-2. Add a voice adapter layer that accepts audio and returns audio.
-3. Store the transcript alongside tool traces.
+2. Extend the provider-neutral `VoiceAdapter` interface for audio sessions.
+3. Store the transcript alongside tool traces in SQLite.
 4. Run normal policy/tool checks before generating speech.
-5. Add browser realtime voice later if low-latency interruption and barge-in
-   become important.
+5. Add a Gemini Live Voice or OpenAI Realtime implementation when low-latency
+   interruption and barge-in become important.
 
 ## When To Use Realtime Speech-To-Speech
 

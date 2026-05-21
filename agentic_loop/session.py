@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 from .controller import AgentController, AgentResult
 from .types import Message
@@ -8,11 +9,31 @@ from .types import Message
 class AgentSession:
     controller: AgentController
     history: list[Message] = field(default_factory=list)
+    session_id: str | None = None
+    storage: Any = None
 
     def ask(self, user_message: str) -> AgentResult:
-        result = self.controller.run(user_message, prior_messages=self.history)
-        self.history.append(Message(role="user", content=user_message))
-        self.history.append(Message(role="assistant", content=result.final_answer))
+        result = self.controller.run(
+            user_message,
+            prior_messages=self.history,
+            session_id=self.session_id,
+        )
+        user = Message(role="user", content=user_message)
+        assistant = Message(role="assistant", content=result.final_answer)
+        self.history.append(user)
+        self.history.append(assistant)
+        if self.storage is not None and self.session_id is not None:
+            self.storage.append_message(self.session_id, user)
+            self.storage.append_message(self.session_id, assistant)
+            if getattr(self.controller, "storage", None) is None:
+                self.storage.save_run_result(
+                    result.run_id,
+                    self.session_id,
+                    result.state.goal,
+                    result.final_answer,
+                    result.evaluation,
+                    result.state.steps,
+                )
         return result
 
     def transcript(self) -> list[dict[str, str]]:
@@ -21,4 +42,3 @@ class AgentSession:
             for message in self.history
             if message.role in {"user", "assistant"}
         ]
-

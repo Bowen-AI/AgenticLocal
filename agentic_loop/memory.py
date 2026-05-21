@@ -2,7 +2,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 
 @dataclass
@@ -10,6 +10,20 @@ class MemoryRecord:
     key: str
     value: Any
     created_at_unix: float
+
+
+class MemoryStore(Protocol):
+    def remember(self, key: str, value: Any) -> MemoryRecord:
+        ...
+
+    def all(self) -> list[MemoryRecord]:
+        ...
+
+    def latest(self, key: str) -> MemoryRecord | None:
+        ...
+
+    def search(self, query: str, limit: int = 5) -> list[MemoryRecord]:
+        ...
 
 
 class JsonlMemory:
@@ -48,4 +62,3 @@ class JsonlMemory:
             if query_lower in haystack:
                 matches.append(record)
         return matches[-limit:]
-

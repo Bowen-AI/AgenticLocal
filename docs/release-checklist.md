@@ -36,7 +36,13 @@ Test coverage includes:
 - Workspace read policy.
 - Workspace write policy.
 - Symlink escape denial.
+- Configurable write roots.
+- Approval-required write roots.
 - JSONL memory remember/recall.
+- SQLite memory remember/recall.
+- Durable SQLite server sessions.
+- SQLite workflow event and registry persistence.
+- SSE event formatting.
 - Max-step stop condition.
 - Trace logging.
 - CLI smoke path.
@@ -51,16 +57,20 @@ Optional environment-dependent checks:
 ```bash
 python3 scripts/smoke_server.py
 python3 scripts/smoke_ollama.py --model gemma3:270m
+python3 scripts/showcase_e2e.py
 ```
 
 Some sandboxes block loopback socket binding. In that case, the normal release
-check still validates the server application logic without binding a port.
+check still validates the server application logic without binding a port. The
+showcase script also binds a loopback server for HTTP and SSE demos.
 
 The Ollama check requires Ollama to be running and the requested model to be
 installed.
 
 Voice support is implemented as an embedded browser page at `/voice`. It uses
-browser speech recognition/synthesis and the existing `/chat` endpoint.
+browser speech recognition/synthesis and the existing `/chat` endpoint. A
+provider-neutral `VoiceAdapter` interface exists for later Gemini Live Voice or
+OpenAI Realtime integrations.
 
 ## Public Release Note
 

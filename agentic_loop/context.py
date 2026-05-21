@@ -1,6 +1,6 @@
 import json
 
-from .memory import JsonlMemory
+from .memory import MemoryStore
 from .types import AgentState, Message
 
 
@@ -26,7 +26,7 @@ class ContextBuilder:
         messages.append(Message(role="user", content=goal))
         return messages
 
-    def state_message(self, state: AgentState, memory: JsonlMemory | None = None) -> Message:
+    def state_message(self, state: AgentState, memory: MemoryStore | None = None) -> Message:
         memory_lines = []
         if memory:
             for record in memory.search(state.goal):

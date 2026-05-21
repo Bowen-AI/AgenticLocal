@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .memory import JsonlMemory
+from .memory import MemoryStore
 
 
 @dataclass
 class ToolContext:
     workspace_root: Path
-    memory: JsonlMemory | None = None
+    memory: MemoryStore | None = None
 
 
 ToolHandler = Callable[[ToolContext, dict[str, Any]], Any]
@@ -22,12 +22,27 @@ class Tool:
     description: str
     parameters: dict[str, Any]
     handler: ToolHandler
+    source: str = "local"
+    risk_level: str = "low"
+    ui_component_hint: str | None = None
+    enabled: bool = True
 
     def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters,
+        }
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "schema": self.schema(),
+            "description": self.description,
+            "source": self.source,
+            "risk_level": self.risk_level,
+            "ui_component_hint": self.ui_component_hint,
+            "enabled": self.enabled,
         }
 
 
@@ -45,6 +60,9 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
+
+    def metadata(self) -> list[dict[str, Any]]:
+        return [tool.metadata() for tool in self._tools.values()]
 
     def run(self, name: str, context: ToolContext, arguments: dict[str, Any]) -> Any:
         if name not in self._tools:
@@ -103,9 +121,6 @@ def read_file(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]
 def write_file(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     root = context.workspace_root.resolve()
     path = _resolve_inside_workspace(root, arguments["path"])
-    outputs = (root / "outputs").resolve()
-    if not (path == outputs or outputs in path.parents):
-        raise PermissionError(f"write path must be inside outputs/: {arguments['path']}")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(arguments.get("content", ""), encoding="utf-8")
@@ -183,6 +198,8 @@ def create_default_tools() -> ToolRegistry:
                 "required": [],
             },
             handler=list_files,
+            risk_level="low",
+            ui_component_hint="file_browser",
         )
     )
     registry.register(
@@ -198,12 +215,14 @@ def create_default_tools() -> ToolRegistry:
                 "required": ["path"],
             },
             handler=read_file,
+            risk_level="low",
+            ui_component_hint="text_preview",
         )
     )
     registry.register(
         Tool(
             name="write_file",
-            description="Write a text file under outputs/.",
+            description="Write a text file under configured writable workspace roots.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -213,6 +232,8 @@ def create_default_tools() -> ToolRegistry:
                 "required": ["path", "content"],
             },
             handler=write_file,
+            risk_level="medium",
+            ui_component_hint="file_writer",
         )
     )
     registry.register(
@@ -225,6 +246,8 @@ def create_default_tools() -> ToolRegistry:
                 "required": ["path"],
             },
             handler=inspect_csv,
+            risk_level="low",
+            ui_component_hint="table_preview",
         )
     )
     registry.register(
@@ -240,6 +263,8 @@ def create_default_tools() -> ToolRegistry:
                 "required": ["key", "value"],
             },
             handler=remember,
+            risk_level="low",
+            ui_component_hint="memory_view",
         )
     )
     registry.register(
@@ -252,6 +277,8 @@ def create_default_tools() -> ToolRegistry:
                 "required": [],
             },
             handler=recall,
+            risk_level="low",
+            ui_component_hint="memory_view",
         )
     )
     return registry
@@ -259,4 +286,3 @@ def create_default_tools() -> ToolRegistry:
 
 def serialize_tool_result(result: Any) -> str:
     return json.dumps(result, indent=2, sort_keys=True)
-

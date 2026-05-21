@@ -1,8 +1,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.agentic/
 .agentic-memory.jsonl
 .agentic-trace.jsonl
 sample_workspace/outputs/*
 !sample_workspace/outputs/.gitkeep
-

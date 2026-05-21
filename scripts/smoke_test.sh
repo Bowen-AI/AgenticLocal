@@ -3,15 +3,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-MEMORY_FILE="${TMPDIR:-/tmp}/agentic-loop-smoke-memory.jsonl"
+DB_FILE="${TMPDIR:-/tmp}/agentic-loop-smoke.db"
 TRACE_FILE="${TMPDIR:-/tmp}/agentic-loop-smoke-trace.jsonl"
 
-MEMORY_FILE="$MEMORY_FILE" TRACE_FILE="$TRACE_FILE" python3 - <<'PY'
+DB_FILE="$DB_FILE" TRACE_FILE="$TRACE_FILE" python3 - <<'PY'
 import os
 from pathlib import Path
 
 for path in [
-    Path(os.environ["MEMORY_FILE"]),
+    Path(os.environ["DB_FILE"]),
+    Path(os.environ["DB_FILE"] + "-wal"),
+    Path(os.environ["DB_FILE"] + "-shm"),
     Path(os.environ["TRACE_FILE"]),
     Path("sample_workspace/outputs/agent_note.txt"),
 ]:
@@ -26,7 +28,7 @@ echo
 echo "== list files =="
 python3 -m agentic_loop \
   "List files in the workspace." \
-  --memory "$MEMORY_FILE" \
+  --db "$DB_FILE" \
   --trace "$TRACE_FILE"
 
 echo
@@ -34,7 +36,7 @@ echo "== inspect csv =="
 INSPECT_OUTPUT="$(
   python3 -m agentic_loop \
     "Inspect data/sample.csv as a dataset." \
-    --memory "$MEMORY_FILE" \
+    --db "$DB_FILE" \
     --trace "$TRACE_FILE" \
     --json
 )"
@@ -53,12 +55,12 @@ echo
 echo "== memory =="
 python3 -m agentic_loop \
   "Remember project language is python." \
-  --memory "$MEMORY_FILE" \
+  --db "$DB_FILE" \
   --trace "$TRACE_FILE"
 RECALL_OUTPUT="$(
   python3 -m agentic_loop \
     "What is the project language?" \
-    --memory "$MEMORY_FILE" \
+    --db "$DB_FILE" \
     --trace "$TRACE_FILE"
 )"
 echo "$RECALL_OUTPUT"
@@ -66,9 +68,9 @@ test "$RECALL_OUTPUT" = "I found memory: project_language=python."
 
 echo
 echo "== interactive chat =="
-CHAT_MEMORY_FILE="${TMPDIR:-/tmp}/agentic-loop-chat-memory.jsonl"
 CHAT_TRACE_FILE="${TMPDIR:-/tmp}/agentic-loop-chat-trace.jsonl"
-rm -f "$CHAT_MEMORY_FILE" "$CHAT_TRACE_FILE"
+CHAT_DB_FILE="${TMPDIR:-/tmp}/agentic-loop-chat.db"
+rm -f "$CHAT_TRACE_FILE" "$CHAT_DB_FILE" "$CHAT_DB_FILE-wal" "$CHAT_DB_FILE-shm"
 CHAT_OUTPUT="$(
   printf '%s\n' \
     "Remember project language is python." \
@@ -77,7 +79,7 @@ CHAT_OUTPUT="$(
     "/history" \
     "/exit" |
   python3 -m agentic_loop chat \
-    --memory "$CHAT_MEMORY_FILE" \
+    --db "$CHAT_DB_FILE" \
     --trace "$CHAT_TRACE_FILE"
 )"
 echo "$CHAT_OUTPUT"
@@ -96,7 +98,7 @@ echo "== denied unsafe read =="
 DENIED_OUTPUT="$(
   python3 -m agentic_loop \
     "Read ../secret.txt" \
-    --memory "$MEMORY_FILE" \
+    --db "$DB_FILE" \
     --trace "$TRACE_FILE" \
     --json
 )"
@@ -115,7 +117,7 @@ echo "== denied unsafe write =="
 DENIED_WRITE_OUTPUT="$(
   python3 -m agentic_loop \
     "Try to overwrite a raw workspace file." \
-    --memory "$MEMORY_FILE" \
+    --db "$DB_FILE" \
     --trace "$TRACE_FILE" \
     --scripted-tool-call '{"name":"write_file","arguments":{"path":"data/raw_overwrite.txt","content":"bad"}}' \
     --scripted-final "I could not complete that action because the policy layer denied it." \
@@ -139,7 +141,7 @@ echo "== write output =="
 WRITE_OUTPUT="$(
   python3 -m agentic_loop \
     "Write a note saying hello from the agent." \
-    --memory "$MEMORY_FILE" \
+    --db "$DB_FILE" \
     --trace "$TRACE_FILE"
 )"
 echo "$WRITE_OUTPUT"

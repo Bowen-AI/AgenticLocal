@@ -7,15 +7,21 @@ from pathlib import Path
 from agentic_loop import (
     AgentController,
     AgentSession,
+    BrowserSpeechVoiceAdapter,
     JsonlMemory,
     ModelResponse,
+    RealtimeVoiceAdapterSpec,
     RuleBasedModel,
     ScriptedModel,
+    SQLiteStore,
+    VoiceAdapter,
+    WorkspaceAccessConfig,
     WorkspacePolicy,
     create_default_tools,
 )
 from agentic_loop.ollama_model import OllamaChatModel
-from agentic_loop.server import AgentServerApp
+from agentic_loop.factory import create_controller
+from agentic_loop.server import AgentServerApp, format_sse_events
 from agentic_loop.voice import voice_page_html
 
 
@@ -33,6 +39,27 @@ class AgenticLoopTest(unittest.TestCase):
             workspace_root=workspace,
             memory=memory,
             max_steps=max_steps,
+        )
+
+    def make_controller_with_policy(
+        self,
+        model=None,
+        workspace=None,
+        write_roots=None,
+        approval_required_roots=None,
+    ):
+        workspace = Path(workspace or SAMPLE_WORKSPACE)
+        access = WorkspaceAccessConfig(
+            workspace,
+            write_roots=write_roots,
+            approval_required_roots=approval_required_roots,
+        )
+        return AgentController(
+            model=model or RuleBasedModel(),
+            tools=create_default_tools(),
+            policy=WorkspacePolicy(workspace, access=access),
+            workspace_root=workspace,
+            max_steps=8,
         )
 
     def test_agent_lists_files_through_tool_loop(self):
@@ -70,6 +97,30 @@ class AgenticLoopTest(unittest.TestCase):
             self.assertEqual(output.read_text(encoding="utf-8"), "hello from the agent.")
             self.assertIn("I wrote outputs/agent_note.txt", result.final_answer)
 
+    def test_configured_write_root_allows_drafts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            model = ScriptedModel(
+                [
+                    ModelResponse.call(
+                        "write_file",
+                        {"path": "drafts/note.txt", "content": "hello drafts"},
+                        "call_drafts",
+                    ),
+                    ModelResponse.final("draft saved"),
+                ]
+            )
+            result = self.make_controller_with_policy(
+                model=model,
+                workspace=workspace,
+                write_roots=("outputs", "drafts"),
+            ).run("Write a draft note")
+
+            output = workspace / "drafts" / "note.txt"
+            self.assertTrue(output.exists())
+            self.assertEqual(output.read_text(encoding="utf-8"), "hello drafts")
+            self.assertTrue(result.state.steps[0].allowed)
+
     def test_policy_denies_outside_read(self):
         model = ScriptedModel(
             [
@@ -97,7 +148,30 @@ class AgenticLoopTest(unittest.TestCase):
         result = self.make_controller(model=model).run("Write raw.txt")
 
         self.assertFalse(result.state.steps[0].allowed)
-        self.assertIn("outputs", result.state.steps[0].observation)
+        self.assertIn("configured write roots (outputs)", result.state.steps[0].observation)
+
+    def test_policy_marks_approval_required_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            model = ScriptedModel(
+                [
+                    ModelResponse.call(
+                        "write_file",
+                        {"path": "reviewed/note.txt", "content": "needs approval"},
+                        "call_reviewed",
+                    ),
+                    ModelResponse.final("stopped after approval request"),
+                ]
+            )
+            result = self.make_controller_with_policy(
+                model=model,
+                workspace=workspace,
+                write_roots=("outputs", "reviewed"),
+                approval_required_roots=("reviewed",),
+            ).run("Write reviewed/note.txt")
+
+            self.assertEqual(result.state.steps[0].action, "approval_required")
+            self.assertFalse((workspace / "reviewed" / "note.txt").exists())
 
     def test_policy_denies_symlink_escape(self):
         if not hasattr(os, "symlink"):
@@ -140,6 +214,20 @@ class AgenticLoopTest(unittest.TestCase):
 
             self.assertIn("I remembered project_language", remember_result.final_answer)
             self.assertIn("project_language=python", recall_result.final_answer)
+
+    def test_sqlite_memory_remember_and_recall(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            memory = SQLiteStore(Path(tmp) / "agentic.db")
+            remember_result = self.make_controller(memory=memory).run(
+                "Remember project language is python."
+            )
+            recall_result = self.make_controller(memory=memory).run(
+                "What is the project language?"
+            )
+
+            self.assertIn("I remembered project_language", remember_result.final_answer)
+            self.assertIn("project_language=python", recall_result.final_answer)
+            self.assertEqual(memory.latest("project_language").value, "python")
 
     def test_interactive_session_keeps_transcript_and_memory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,8 +304,7 @@ class AgenticLoopTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             app = AgentServerApp(
                 workspace=str(SAMPLE_WORKSPACE),
-                memory_path=str(Path(tmp) / "memory.jsonl"),
-                trace_path=str(Path(tmp) / "trace.jsonl"),
+                db_path=str(Path(tmp) / "agentic.db"),
             )
             first = app.chat("Remember project language is python.")
             second = app.chat("What is the project language?", first["session_id"])
@@ -228,6 +315,66 @@ class AgenticLoopTest(unittest.TestCase):
             self.assertIn("project_language=python", second["final_answer"])
             self.assertEqual(len(second["transcript"]), 4)
             self.assertIn("4 row(s)", one_shot["final_answer"])
+
+    def test_server_session_persists_across_app_recreation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "agentic.db")
+            first_app = AgentServerApp(workspace=str(SAMPLE_WORKSPACE), db_path=db_path)
+            first = first_app.chat("Remember project language is python.")
+
+            second_app = AgentServerApp(workspace=str(SAMPLE_WORKSPACE), db_path=db_path)
+            second = second_app.chat("What is the project language?", first["session_id"])
+
+            self.assertEqual(first["session_id"], second["session_id"])
+            self.assertIn("project_language=python", second["final_answer"])
+            self.assertEqual(len(second["transcript"]), 4)
+
+    def test_sqlite_events_and_registries_are_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+            )
+            result = app.run_once("Inspect data/sample.csv as a dataset.")
+            events = app.events()
+            event_types = [event["event_type"] for event in events]
+            tool_names = {item["name"] for item in app.tool_registry()}
+            ui_components = {item["component"] for item in app.ui_registry()}
+
+            self.assertIn("run_started", event_types)
+            self.assertIn("tool_requested", event_types)
+            self.assertIn("tool_result", event_types)
+            self.assertIn("final_answer", event_types)
+            self.assertIn(result["run_id"], {event["run_id"] for event in events})
+            self.assertIn("inspect_csv", tool_names)
+            self.assertIn("table_preview", ui_components)
+
+    def test_sse_stream_uses_persisted_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+            )
+            result = app.chat("Inspect data/sample.csv as a dataset.")
+            events = app.events(session_id=result["session_id"])
+            stream = format_sse_events(events)
+
+            self.assertIn("event: run_started", stream)
+            self.assertIn("event: tool_result", stream)
+            self.assertIn("event: final_answer", stream)
+            self.assertEqual(events, app.storage.events_after(session_id=result["session_id"]))
+
+    def test_provider_selection_rejects_unknown_provider(self):
+        with self.assertRaises(ValueError):
+            create_controller(provider="unknown", db_path=None)
+
+    def test_voice_adapter_interface_can_be_mocked(self):
+        browser = BrowserSpeechVoiceAdapter()
+        realtime = RealtimeVoiceAdapterSpec("gemini-live")
+
+        self.assertIsInstance(browser, VoiceAdapter)
+        self.assertFalse(browser.describe().realtime)
+        self.assertTrue(realtime.describe().realtime)
 
     def test_voice_page_embeds_chat_voice_controls(self):
         html = voice_page_html("0.1.0")

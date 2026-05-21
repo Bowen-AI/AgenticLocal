@@ -122,12 +122,33 @@ The current model is deterministic for testing. That is intentional: it proves
 the runtime, policy, session, tools, memory, trace, and server behavior without
 requiring an API key or a local model process.
 
+Current storage and policy behavior:
+
+```text
+SQLite .agentic/agentic.db
+  -> durable sessions/messages
+  -> long-term memory
+  -> run steps
+  -> workflow events/traces
+  -> tool registry metadata
+  -> UI registry metadata
+
+Workspace policy
+  -> configured read roots
+  -> configured write roots
+  -> approval-required roots
+  -> symlink/path escape checks
+```
+
+The default write root is still `outputs/`, but callers can add named writable
+roots with `--write-root`, for example `drafts` or `notebooks`.
+
 Next model work should be adapter-focused, not a rewrite:
 
 ```text
-agentic_loop/providers/openai.py
-agentic_loop/providers/ollama.py
+agentic_loop/providers/openai_compatible.py
 agentic_loop/providers/localai.py
+agentic_loop/ollama_model.py
 ```
 
 ## Sources
