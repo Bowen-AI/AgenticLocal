@@ -461,6 +461,29 @@ class AgenticLoopTest(unittest.TestCase):
         self.assertEqual(result.state.steps[0].observation["query"], "top stories")
         self.assertIn("Google News RSS", result.final_answer)
 
+    def test_repeated_identical_tool_call_finalizes_from_prior_result(self):
+        model = ScriptedModel(
+            [
+                ModelResponse.call(
+                    "search_news",
+                    {"query": "top stories", "max_results": 5},
+                    "call_news_1",
+                ),
+                ModelResponse.call(
+                    "search_news",
+                    {"query": "top stories", "max_results": 5},
+                    "call_news_2",
+                ),
+            ]
+        )
+        result = self.make_network_controller(model=model).run("Tell me today's top news.")
+
+        tool_calls = [step for step in result.state.steps if step.action == "tool_call"]
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(result.state.steps[-1].action, "repeated_tool_finalized")
+        self.assertNotEqual(result.final_answer, "Agent stopped because the step limit was reached.")
+        self.assertIn("Google News RSS", result.final_answer)
+
     def test_interactive_planner_can_search_web(self):
         result = self.make_network_controller().run("Search the internet for agentic AI.")
 

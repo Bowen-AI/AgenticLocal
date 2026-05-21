@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import uuid
 from typing import Any
@@ -160,6 +161,47 @@ class AgentController:
                 )
                 continue
 
+            repeated_step = self._find_successful_repeated_tool_step(
+                state,
+                call.name,
+                call.arguments,
+            )
+            if repeated_step is not None:
+                final_answer = self._final_from_tool_result(call.name, repeated_step.observation)
+                state.final_answer = final_answer
+                state.add_step(
+                    AgentStep(
+                        index=index,
+                        action="repeated_tool_finalized",
+                        tool_name=call.name,
+                        arguments=call.arguments,
+                        observation=repeated_step.observation,
+                    )
+                )
+                self.logger.log(
+                    "tool_repeated",
+                    {
+                        "tool": call.name,
+                        "arguments": call.arguments,
+                        "previous_step_index": repeated_step.index,
+                    },
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+                self._log_state_delta(state, session_id, run_id)
+                self.logger.log(
+                    "final_answer",
+                    {"content": final_answer},
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+                return self._result(
+                    state=state,
+                    final_answer=final_answer,
+                    run_id=run_id,
+                    session_id=session_id,
+                )
+
             try:
                 result = self.tools.run(call.name, tool_context, call.arguments)
                 serialized = serialize_tool_result(result)
@@ -235,6 +277,86 @@ class AgentController:
             run_id=run_id,
             session_id=session_id,
         )
+
+    def _find_successful_repeated_tool_step(
+        self,
+        state: AgentState,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> AgentStep | None:
+        signature = self._tool_signature(tool_name, arguments)
+        for step in reversed(state.steps):
+            if (
+                step.action == "tool_call"
+                and step.allowed
+                and step.error is None
+                and self._tool_signature(step.tool_name or "", step.arguments) == signature
+            ):
+                return step
+        return None
+
+    def _tool_signature(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        return json.dumps(
+            {"tool": tool_name, "arguments": arguments},
+            sort_keys=True,
+            default=str,
+        )
+
+    def _final_from_tool_result(self, tool_name: str, result: Any) -> str:
+        if not isinstance(result, dict):
+            return f"Tool {tool_name} already returned: {result}"
+
+        if tool_name == "list_files":
+            files = result.get("files", [])
+            return f"I found {len(files)} file(s): {', '.join(files)}."
+
+        if tool_name == "read_file":
+            content = result.get("content", "")
+            first_line = content.strip().splitlines()[0] if content.strip() else ""
+            return f"I read {result.get('path')}. First line: {first_line}"
+
+        if tool_name == "write_file":
+            return f"I wrote {result.get('path')}."
+
+        if tool_name == "inspect_csv":
+            return (
+                f"I inspected {result.get('path')}: {result.get('rows')} row(s), "
+                f"columns: {', '.join(result.get('columns', []))}."
+            )
+
+        if tool_name == "remember":
+            return f"I remembered {result.get('key')}."
+
+        if tool_name == "recall":
+            records = result.get("records", [])
+            if not records:
+                return "I did not find matching memory."
+            rendered = ", ".join(f"{item.get('key')}={item.get('value')}" for item in records)
+            return f"I found memory: {rendered}."
+
+        if tool_name == "current_datetime":
+            return (
+                f"Today is {result.get('weekday')}, {result.get('date')}. "
+                f"The local time is {result.get('time')} {result.get('timezone')}."
+            )
+
+        if tool_name in {"search_web", "search_news"}:
+            results = result.get("results", [])
+            if not results:
+                return f"I did not find results for {result.get('query')}."
+            rendered = "; ".join(
+                f"{index}. {item.get('title')}"
+                for index, item in enumerate(results[:3], start=1)
+            )
+            return f"I found {len(results)} result(s) from {result.get('source')}: {rendered}."
+
+        if tool_name == "fetch_url":
+            title = result.get("title") or result.get("url")
+            content = result.get("content", "")
+            preview = content[:180].strip()
+            return f"I fetched {title}. Preview: {preview}"
+
+        return f"Tool {tool_name} already completed."
 
     def _log_state_delta(
         self,
