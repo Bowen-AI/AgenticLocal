@@ -214,6 +214,7 @@ h3 {
 .showcase,
 .runtime,
 .use-cases,
+.about,
 .docs-band {
   padding: clamp(56px, 8vw, 104px) clamp(20px, 5vw, 72px);
 }
@@ -533,4 +534,18 @@ h3 {
   .site-footer {
     flex-direction: column;
   }
+}
+
+
+.about {
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.about-copy {
+  max-width: 760px;
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 18px;
 }
