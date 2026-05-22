@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Example Screenshots
+description: Preview AgenticLocal screenshots for terminal chat, browser voice mode, and persisted event streams using checked-in SVG assets for the docs site.
 ---
 
 # Example Screenshots

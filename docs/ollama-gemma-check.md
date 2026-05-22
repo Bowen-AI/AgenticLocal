@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Ollama Gemma Check
+description: Local Ollama compatibility notes and tested Gemma model behavior for running AgenticLocal with small local model adapters.
 ---
 
 # Ollama Gemma Check

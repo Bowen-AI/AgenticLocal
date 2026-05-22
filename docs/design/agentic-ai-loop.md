@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Agentic AI Loop
+description: A concise design note explaining the core agentic AI loop of model, state, tools, and policy that powers AgenticLocal.
 ---
 
 # Agentic AI: The Loop

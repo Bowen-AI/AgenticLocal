@@ -1,0 +1,15 @@
+---
+layout: null
+---
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>{{ "/" | absolute_url }}</loc>
+  </url>
+  {% assign seo_pages = site.pages | where_exp: "page", "page.layout == 'default' and page.sitemap != false" %}
+  {% for page in seo_pages %}
+  <url>
+    <loc>{{ page.url | absolute_url }}</loc>
+  </url>
+  {% endfor %}
+</urlset>

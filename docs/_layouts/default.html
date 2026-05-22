@@ -1,11 +1,64 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ site.lang | default: 'en' }}">
   <head>
+    {% assign seo_title = page.title | default: site.title %}
+    {% if page.title and page.title != site.title %}
+      {% assign document_title = seo_title | append: ' | ' | append: site.title %}
+    {% else %}
+      {% assign document_title = site.title | append: ' | Local-first agent runtime' %}
+    {% endif %}
+    {% assign seo_description = page.description | default: site.description %}
+    {% assign canonical_url = page.url | absolute_url %}
+    {% assign seo_image = page.image | default: site.image | absolute_url %}
+    {% assign repository_url = site.repository | prepend: 'https://github.com/' %}
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ page.title }} | {{ site.title }}</title>
-    <meta name="description" content="{{ site.description }}">
+    <title>{{ document_title | escape }}</title>
+    <meta name="description" content="{{ seo_description | strip_newlines | escape }}">
+    <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large">
+    <meta name="googlebot" content="index,follow,max-snippet:-1,max-image-preview:large">
+    {% if site.keywords %}
+    <meta name="keywords" content="{{ site.keywords | join: ', ' | escape }}">
+    {% endif %}
+    {% if site.google_site_verification %}
+    <meta name="google-site-verification" content="{{ site.google_site_verification | escape }}">
+    {% endif %}
+    <link rel="canonical" href="{{ canonical_url }}">
+    <meta property="og:site_name" content="{{ site.title | escape }}">
+    <meta property="og:title" content="{{ seo_title | escape }}">
+    <meta property="og:description" content="{{ seo_description | strip_newlines | escape }}">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="{{ canonical_url }}">
+    <meta property="og:image" content="{{ seo_image }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ seo_title | escape }}">
+    <meta name="twitter:description" content="{{ seo_description | strip_newlines | escape }}">
+    <meta name="twitter:image" content="{{ seo_image }}">
+    <meta name="theme-color" content="#111827">
     <link rel="stylesheet" href="{{ '/site.css' | relative_url }}">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "name": {{ seo_title | jsonify }},
+        "headline": {{ seo_title | jsonify }},
+        "description": {{ seo_description | jsonify }},
+        "url": {{ canonical_url | jsonify }},
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": {{ site.title | jsonify }},
+          "url": {{ "/" | absolute_url | jsonify }}
+        },
+        "about": {
+          "@type": "SoftwareSourceCode",
+          "name": {{ site.title | jsonify }},
+          "codeRepository": {{ repository_url | jsonify }},
+          "programmingLanguage": "Python",
+          "runtimePlatform": "Python 3.11+",
+          "applicationCategory": "DeveloperApplication"
+        }
+      }
+    </script>
   </head>
   <body class="doc-page">
     <header class="site-header">

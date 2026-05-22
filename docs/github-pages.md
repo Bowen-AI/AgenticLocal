@@ -1,6 +1,7 @@
 ---
 layout: default
 title: GitHub Pages Deploy
+description: How to publish the AgenticLocal project website from the docs folder with GitHub Pages and preview the static pages locally.
 ---
 
 # GitHub Pages Deploy
@@ -57,6 +58,25 @@ docs/assets/screenshots/
 ```
 
 Markdown docs in `docs/` are also rendered by GitHub Pages through Jekyll.
+
+## Search Indexing
+
+The site publishes crawler discovery files at:
+
+```text
+https://bowen-ai.github.io/AgenticLocal/robots.txt
+https://bowen-ai.github.io/AgenticLocal/sitemap.xml
+```
+
+After GitHub Pages finishes deploying, add the property in Google Search
+Console and submit:
+
+```text
+https://bowen-ai.github.io/AgenticLocal/sitemap.xml
+```
+
+If Google Search Console gives you an HTML meta verification token, paste the
+token into `google_site_verification` in `docs/_config.yml`.
 
 ## Local Preview
 

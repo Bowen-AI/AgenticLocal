@@ -11,7 +11,8 @@ Current version: `0.1.0`
 
 Start here:
 
-- [Project Page](docs/index.html)
+- [Published Project Page](https://bowen-ai.github.io/AgenticLocal/)
+- [Local Project Page Source](docs/index.html)
 - [Agentic AI: The Loop](docs/design/agentic-ai-loop.md)
 - [Install Guide](docs/install.md)
 - [Use Cases](docs/use-cases.md)

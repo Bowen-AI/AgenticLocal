@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Voice Agents
+description: Voice-agent architecture notes for AgenticLocal, including browser voice mode, realtime integration plans, and speech pipeline options.
 ---
 
 # Voice Agents

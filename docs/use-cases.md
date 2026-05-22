@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Use Cases
+description: Practical AgenticLocal workflows for local workspace assistance, dataset triage, durable memory, research tools, approvals, and HTTP service mode.
 ---
 
 # Use Cases

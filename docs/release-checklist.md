@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Release Checklist
+description: Release checks for packaging, installation, smoke tests, docs, screenshots, and version metadata before publishing AgenticLocal.
 ---
 
 # Release Checklist

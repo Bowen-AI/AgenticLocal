@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Install Guide
+description: Install AgenticLocal from source or with the bootstrap script, run the agentic-loop command, start chat, and configure Ollama or provider adapters.
 ---
 
 # Install Guide

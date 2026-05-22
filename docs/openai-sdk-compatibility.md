@@ -1,6 +1,7 @@
 ---
 layout: default
 title: OpenAI SDK Compatibility
+description: Compare AgenticLocal's local agent loop, tool schemas, provider adapters, and runtime boundaries with the OpenAI Agents SDK architecture.
 ---
 
 # OpenAI Agents SDK Compatibility

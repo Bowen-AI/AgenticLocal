@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Architecture Decision
+description: Why AgenticLocal uses an inspectable local agent loop with a tool registry, policy engine, SQLite storage, and provider adapters instead of a full SDK dependency.
 ---
 
 # Architecture Decision

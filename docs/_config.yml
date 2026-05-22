@@ -1,3 +1,21 @@
 title: AgenticLocal
 description: Local-first agent runtime with tools, policy, memory, and event streams.
+url: https://bowen-ai.github.io
+baseurl: /AgenticLocal
+repository: Bowen-AI/AgenticLocal
+author: Bowen AI
+logo: /assets/screenshots/voice-mode.svg
+image: /assets/screenshots/voice-mode.svg
+lang: en
+google_site_verification: aOBPWfdIMvfVZ9nvI3cEKqeC5sh6ztQ5HINFHwpk1fo
+keywords:
+  - AgenticLocal
+  - local-first AI agent
+  - agentic AI runtime
+  - Python agent framework
+  - local AI assistant
+  - tool-using agent
+  - SQLite agent memory
+  - Ollama agent
+  - OpenAI-compatible agent runtime
 markdown: kramdown
