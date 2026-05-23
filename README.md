@@ -16,6 +16,7 @@ Start here:
 - [Agentic AI: The Loop](docs/design/agentic-ai-loop.md)
 - [Install Guide](docs/install.md)
 - [Use Cases](docs/use-cases.md)
+- [Learning Loop](docs/learning-loop.md)
 - [Example Screenshots](docs/example-screenshots.md)
 - [GitHub Pages Deploy](docs/github-pages.md)
 
@@ -145,6 +146,12 @@ Then open the embedded voice mode:
 http://127.0.0.1:8765/voice
 ```
 
+By default `/voice` tries Gemini Live when `GEMINI_API_KEY` or
+`GOOGLE_API_KEY` is set, then falls back to the browser Web Speech API. Keep
+voice local-browser only with `--voice-provider browser`, or request the live
+path with `--voice-provider gemini-live`. Override the preview Live model with
+`--voice-model` or `AGENTIC_LOOP_GEMINI_LIVE_MODEL`.
+
 Or call it from another terminal:
 
 ```bash
@@ -155,6 +162,9 @@ curl -s http://127.0.0.1:8765/memory
 curl -s http://127.0.0.1:8765/registry/models
 curl -s http://127.0.0.1:8765/registry/rules
 curl -s http://127.0.0.1:8765/registry/workflows
+curl -s http://127.0.0.1:8765/voice/config
+curl -s http://127.0.0.1:8765/learning/drafts
+curl -s http://127.0.0.1:8765/skills
 curl -s -X POST http://127.0.0.1:8765/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"Inspect data/sample.csv as a dataset.","workflow":"loop"}'
@@ -186,7 +196,8 @@ By default, durable app state is stored in:
 ```
 
 That SQLite database stores sessions, messages, run steps, long-term memory,
-events/traces, tool/UI registry metadata, and rule/workflow registry metadata.
+learning experiences/drafts/skills, events/traces, tool/UI registry metadata,
+and rule/workflow registry metadata.
 JSONL memory and trace files are still available as optional legacy/export
 paths through `--memory` and `--trace`.
 
@@ -201,7 +212,26 @@ python3 -m agentic_loop chat --enable-network-tools
 ```
 
 Inside chat, use `/rules`, `/rule on max_effort`, `/models`,
-`/model ollama qwen3.5:4b-mlx`, `/loop`, `/search`, and `/release`.
+`/model ollama qwen3.5:4b-mlx`, `/learn`, `/skills`, `/loop`, `/search`, and
+`/release`.
+
+Learning runs in conservative draft mode by default. Completed runs are
+summarized into SQLite, repeatable patterns become draft memories or procedural
+skills, and nothing is activated until you approve it:
+
+```text
+/learn
+/learn approve ID
+/learn reject ID
+/skills
+/skill KEY
+/skill archive KEY
+```
+
+Use `--learning off` to disable the loop, or `--learning-threshold N` to change
+how many repeated patterns are needed before proposing a procedural skill.
+Served mode exposes the same review surface through `/learning/drafts` and
+`/skills`. See [Learning Loop](docs/learning-loop.md).
 
 When chat starts without `--provider`, it uses `--provider ollama --model qwen3.5:4b-mlx`.
 Use `--provider rule` for deterministic offline demos and tool-loop tests.
@@ -277,6 +307,7 @@ Current coverage checks:
 - structured result shape
 - provider adapter selection
 - voice adapter interface
+- learning loop storage, review commands, and skill reuse
 - Ollama adapter parsing/fallback behavior
 
 ## Package
@@ -341,8 +372,10 @@ agentic_loop/
   tools.py       # tool schemas and implementations
   policy.py      # permissions
   context.py     # context construction
+  learning.py    # local observe/reflect/distill learning loop
+  skills.py      # procedural skill markdown and matching
   memory.py      # JSONL long-term memory
-  storage.py     # SQLite sessions, events, memory, traces, registries
+  storage.py     # SQLite sessions, events, memory, skills, traces, registries
   state.py       # agent state
   evals.py       # completion/safety evaluation
   logs.py        # JSONL traces
@@ -368,10 +401,11 @@ User / UI
        -> Rule Resolver
        -> Workspace Policy
        -> Tool Registry
+       -> Learning Loop
        -> Event Logger
        -> Evaluator
   -> SQLite Storage
-       -> sessions, messages, memory, events, traces, registries
+       -> sessions, messages, memory, skills, events, traces, registries
   -> Workspace Files
        -> read roots, write roots, approval-gated roots
 ```
@@ -394,11 +428,17 @@ HTTP API
   -> GET /events?follow=1&timeout=30
   -> GET /tools         tool schemas + registry metadata
   -> GET /memory        long-term memory records
+  -> GET /learning/drafts
+  -> GET /skills
+  -> GET /skills/{key}
   -> GET /sessions      durable session list
   -> GET /registry/ui   UI component registry metadata
   -> GET /registry/rules
   -> GET /registry/workflows
   -> GET /registry/models
+  -> POST /learning/drafts/approve
+  -> POST /learning/drafts/reject
+  -> POST /skills/archive
 
 Agent Runtime
   -> Context Builder
@@ -421,6 +461,10 @@ Agent Runtime
        - memory tools
        - opt-in web/news/fetch tools
        - future paper, dataset, MCP tools
+  -> Learning Loop
+       - observe completed run summaries
+       - reflect into structured draft artifacts
+       - reuse approved procedural skills by trigger matching
   -> Event Logger
   -> Evaluator
 
@@ -429,6 +473,8 @@ Storage
        - sessions + messages
        - working state + steps
        - long-term memory
+       - learning experiences + drafts
+       - procedural skills + skill uses
        - tool registry metadata
        - UI registry metadata
        - rule registry metadata + settings
@@ -440,11 +486,12 @@ Storage
        - approval-gated risky roots
 
 Voice
-  -> Browser Web Speech pipeline now
-  -> VoiceAdapter interface for realtime providers later
-       - Gemini Live Voice example
-       - OpenAI Realtime example
-       - same policy/tools/memory/runtime underneath
+  -> Gemini Live browser audio when configured
+       - ephemeral tokens minted by the local server
+       - 16 kHz PCM microphone input over browser WebSocket
+       - 24 kHz PCM spoken replies from Gemini Live
+  -> Browser Web Speech fallback
+  -> Same policy/tools/memory/runtime underneath
 ```
 
 Memory/state split:
@@ -462,6 +509,10 @@ Session memory
 Long-term memory
   Deliberate remember/recall facts persisted across sessions.
 
+Procedural skills
+  Approved local Markdown workflows matched by lightweight triggers and injected
+  only when relevant.
+
 Retrieval memory
   Future searchable project/code/docs chunks, separate from long-term facts.
 ```
@@ -475,4 +526,5 @@ Related notes:
 - [GitHub Pages Deploy](docs/github-pages.md)
 - [OpenAI Agents SDK compatibility](docs/openai-sdk-compatibility.md)
 - [Ollama Gemma check](docs/ollama-gemma-check.md)
+- [Learning Loop](docs/learning-loop.md)
 - [Voice agents](docs/voice-agents.md)

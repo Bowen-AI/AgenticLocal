@@ -12,7 +12,7 @@ from .providers.localai import LocalAIChatModel
 from .providers.openai_compatible import OpenAICompatibleChatModel
 from .rules import RuleResolver
 from .storage import SQLiteStore
-from .tools import WebClient, create_default_tools
+from .tools import ToolContext, ToolRegistry, WebClient, create_default_tools
 
 
 def create_controller(
@@ -25,6 +25,7 @@ def create_controller(
     provider: str = "rule",
     model_name: str | None = None,
     ollama_host: str = "http://127.0.0.1:11434",
+    ollama_think: bool | str | None = False,
     api_base: str | None = None,
     api_key: str | None = None,
     read_roots: list[str | Path] | tuple[str | Path, ...] | None = None,
@@ -33,12 +34,17 @@ def create_controller(
     storage: SQLiteStore | None = None,
     enable_network_tools: bool = False,
     web_client: WebClient | None = None,
+    tools: ToolRegistry | None = None,
+    allowed_tools: set[str] | None = None,
+    tool_context: ToolContext | None = None,
     enabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
     disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
     workflow_key: str | None = None,
+    learning_mode: str = "draft",
+    learning_threshold: int = 2,
 ) -> AgentController:
     workspace_path = Path(workspace)
-    registry = create_default_tools(enable_network=enable_network_tools)
+    registry = tools or create_default_tools(enable_network=enable_network_tools)
     selected_storage = storage
     if selected_storage is None and db_path is not None:
         selected_storage = SQLiteStore(db_path)
@@ -63,6 +69,7 @@ def create_controller(
             selected_model = OllamaChatModel(
                 model=model_selection.model_name or "",
                 host=model_selection.ollama_host or "http://127.0.0.1:11434",
+                think=ollama_think,
             )
         elif model_selection.provider in {"openai", "openai-compatible"}:
             selected_model = OpenAICompatibleChatModel(
@@ -102,7 +109,11 @@ def create_controller(
     return AgentController(
         model=selected_model,
         tools=registry,
-        policy=WorkspacePolicy(workspace_path, access=access),
+        policy=WorkspacePolicy(
+            workspace_path,
+            allowed_tools=allowed_tools or registry.names(),
+            access=access,
+        ),
         workspace_root=workspace_path,
         memory=memory,
         logger=logger,
@@ -113,4 +124,7 @@ def create_controller(
         enabled_rule_keys=enabled_rule_keys,
         disabled_rule_keys=disabled_rule_keys,
         workflow_key=workflow_key,
+        tool_context=tool_context,
+        learning_mode=learning_mode,
+        learning_threshold=learning_threshold,
     )

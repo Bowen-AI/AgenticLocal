@@ -4,7 +4,7 @@ import re
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -41,6 +41,7 @@ class ToolContext:
     workspace_root: Path
     memory: MemoryStore | None = None
     web_client: WebClient | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 ToolHandler = Callable[[ToolContext, dict[str, Any]], Any]

@@ -37,6 +37,7 @@ class ContextBuilder:
         state: AgentState,
         memory: MemoryStore | None = None,
         active_rules: list[Any] | None = None,
+        active_skills: list[dict[str, Any]] | None = None,
     ) -> Message:
         memory_lines = []
         if memory:
@@ -48,6 +49,17 @@ class ContextBuilder:
             prompt_text = getattr(rule, "prompt_text", "")
             if key and prompt_text:
                 rule_lines.append(f"- {key}: {prompt_text}")
+        skill_lines = []
+        skill_detail_lines = []
+        for skill in active_skills or []:
+            key = skill.get("key") or ""
+            title = skill.get("title") or key
+            description = skill.get("description") or ""
+            triggers = ", ".join(skill.get("triggers") or [])
+            skill_lines.append(f"- {key}: {title} - {description} (triggers: {triggers})")
+            markdown = (skill.get("markdown") or "").strip()
+            if markdown:
+                skill_detail_lines.append(f"Skill detail: {key}\n{markdown}")
 
         content = [
             "Current agent state:",
@@ -61,5 +73,9 @@ class ContextBuilder:
         if memory_lines:
             content.append("Relevant memory:")
             content.extend(memory_lines)
+        if skill_lines:
+            content.append("Relevant skills:")
+            content.extend(skill_lines)
+            content.extend(skill_detail_lines)
 
         return Message(role="system", content="\n".join(content))

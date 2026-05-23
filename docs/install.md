@@ -146,7 +146,8 @@ By default, app state is stored in:
 ```
 
 That SQLite database stores sessions, messages, run steps, long-term memory,
-tool/UI registry metadata, rule/workflow registry metadata, and events/traces.
+learning experiences/drafts/skills, tool/UI registry metadata, rule/workflow
+registry metadata, and events/traces.
 It is ignored by git.
 
 Use a different database path:
@@ -242,6 +243,8 @@ curl -s http://127.0.0.1:8765/tools
 curl -s http://127.0.0.1:8765/registry/models
 curl -s http://127.0.0.1:8765/registry/rules
 curl -s http://127.0.0.1:8765/registry/workflows
+curl -s http://127.0.0.1:8765/learning/drafts
+curl -s http://127.0.0.1:8765/skills
 curl -s -X POST http://127.0.0.1:8765/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"Inspect data/sample.csv as a dataset.","workflow":"loop"}'
@@ -292,6 +295,12 @@ Inside interactive chat:
 /model ollama qwen3.5:4b-mlx
 /model openai your-openai-model
 /model provider=openai-compatible model=your-model api_base=https://provider.example/v1 api_key=...
+/learn
+/learn approve ID
+/learn reject ID
+/skills
+/skill KEY
+/skill archive KEY
 ```
 
 If you do not pass `--provider`, interactive chat starts with Ollama `qwen3.5:4b-mlx`.
@@ -304,6 +313,9 @@ Useful endpoints:
 GET  /health
 GET  /tools
 GET  /memory
+GET  /learning/drafts
+GET  /skills
+GET  /skills/{key}
 GET  /sessions
 GET  /events
 GET  /events?follow=1&timeout=30
@@ -313,13 +325,24 @@ GET  /registry/rules
 GET  /registry/workflows
 GET  /registry/models
 GET  /voice
+GET  /voice/config
 POST /chat
 POST /run
 POST /sessions
+POST /voice/gemini/token
 POST /models/select
+POST /learning/drafts/approve
+POST /learning/drafts/reject
+POST /skills/archive
 POST /rules/toggle
 POST /workflows/start
 ```
+
+Learning defaults to `--learning draft`, which records completed-run
+experiences and creates draft memories or procedural skills only when the local
+threshold is met. Use `--learning off` to disable it, or
+`--learning-threshold N` to tune how many repeated successful patterns are
+needed before a skill draft appears.
 
 ## Verify
 

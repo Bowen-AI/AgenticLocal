@@ -6,6 +6,12 @@ from typing import Any
 
 from .context import ContextBuilder
 from .evals import BasicEvaluator
+from .learning import (
+    normalize_learning_mode,
+    record_learning_result,
+    record_skill_use_results,
+    relevant_skills,
+)
 from .logs import JsonlTraceLogger
 from .memory import MemoryStore
 from .model import AgentModel
@@ -40,6 +46,9 @@ class AgentController:
         enabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         workflow_key: str | None = None,
+        tool_context: ToolContext | None = None,
+        learning_mode: str = "draft",
+        learning_threshold: int = 2,
     ):
         self.model = model
         self.tools = tools
@@ -56,6 +65,9 @@ class AgentController:
         self.enabled_rule_keys = set(enabled_rule_keys or ())
         self.disabled_rule_keys = set(disabled_rule_keys or ())
         self.workflow_key = workflow_key
+        self.tool_context = tool_context
+        self.learning_mode = normalize_learning_mode(learning_mode)
+        self.learning_threshold = learning_threshold
 
     def run(
         self,
@@ -90,19 +102,25 @@ class AgentController:
                 session_id=session_id,
                 run_id=run_id,
             )
-            return self._result(state, workflow_error, run_id, session_id)
+            return self._result(
+                state,
+                workflow_error,
+                run_id,
+                session_id,
+                workflow_key=workflow_key or self.workflow_key,
+                active_rule_keys=[],
+                matched_skills=[],
+            )
 
         messages = self.context_builder.initial_messages(
             goal,
             prior_messages,
             workflow_prompt=workflow.prompt_prefix if workflow else None,
         )
-        tool_context = ToolContext(
-            workspace_root=self.workspace_root,
-            memory=self.memory,
-            web_client=self.web_client,
-        )
+        tool_context = self._tool_context()
         run_max_steps = workflow.max_steps_override if workflow and workflow.max_steps_override else self.max_steps
+        matched_skills = self._matched_learning_skills(goal)
+        active_rule_keys_for_learning: list[str] = []
 
         self.logger.log(
             "run_started",
@@ -127,7 +145,9 @@ class AgentController:
                 state,
                 self.memory,
                 active_rules=active_rules,
+                active_skills=matched_skills,
             )
+            active_rule_keys_for_learning = [rule.key for rule in active_rules]
             model_messages = [messages[0], context_message, *messages[1:]]
             self.logger.log(
                 "model_requested",
@@ -161,6 +181,9 @@ class AgentController:
                     final_answer=response.final_answer,
                     run_id=run_id,
                     session_id=session_id,
+                    workflow_key=workflow.key if workflow else None,
+                    active_rule_keys=active_rule_keys_for_learning,
+                    matched_skills=matched_skills,
                 )
 
             if response.tool_call is None:
@@ -266,6 +289,9 @@ class AgentController:
                     final_answer=final_answer,
                     run_id=run_id,
                     session_id=session_id,
+                    workflow_key=workflow.key if workflow else None,
+                    active_rule_keys=active_rule_keys_for_learning,
+                    matched_skills=matched_skills,
                 )
 
             try:
@@ -342,6 +368,9 @@ class AgentController:
             final_answer=state.final_answer,
             run_id=run_id,
             session_id=session_id,
+            workflow_key=workflow.key if workflow else None,
+            active_rule_keys=active_rule_keys_for_learning,
+            matched_skills=matched_skills,
         )
 
     def _find_successful_repeated_tool_step(
@@ -443,6 +472,9 @@ class AgentController:
         final_answer: str,
         run_id: str,
         session_id: str | None,
+        workflow_key: str | None = None,
+        active_rule_keys: list[str] | None = None,
+        matched_skills: list[dict[str, Any]] | None = None,
     ) -> AgentResult:
         evaluation = self.evaluator.evaluate(state)
         if self.storage is not None:
@@ -454,6 +486,34 @@ class AgentController:
                 evaluation,
                 state.steps,
             )
+            try:
+                learning = record_learning_result(
+                    self.storage,
+                    state=state,
+                    final_answer=final_answer,
+                    evaluation=evaluation,
+                    run_id=run_id,
+                    session_id=session_id,
+                    learning_mode=self.learning_mode,
+                    learning_threshold=self.learning_threshold,
+                    workflow=workflow_key,
+                    active_rules=active_rule_keys,
+                )
+                experience = learning.get("experience") or {}
+                record_skill_use_results(
+                    self.storage,
+                    matched_skills or [],
+                    run_id=run_id,
+                    session_id=session_id,
+                    outcome=experience.get("outcome") or "unknown",
+                )
+            except Exception as exc:
+                self.logger.log(
+                    "learning_error",
+                    {"error": f"{type(exc).__name__}: {exc}"},
+                    session_id=session_id,
+                    run_id=run_id,
+                )
         return AgentResult(
             final_answer=final_answer,
             state=state,
@@ -463,6 +523,30 @@ class AgentController:
 
     def _resolve_workflow(self, workflow_key: str | None) -> WorkflowDefinition | None:
         return self.rule_resolver.workflow(workflow_key)
+
+    def _tool_context(self) -> ToolContext:
+        if self.tool_context is None:
+            return ToolContext(
+                workspace_root=self.workspace_root,
+                memory=self.memory,
+                web_client=self.web_client,
+            )
+        self.tool_context.workspace_root = self.workspace_root
+        self.tool_context.memory = self.memory
+        self.tool_context.web_client = self.web_client
+        return self.tool_context
+
+    def _matched_learning_skills(self, goal: str) -> list[dict[str, Any]]:
+        if self.learning_mode == "off" or self.storage is None:
+            return []
+        try:
+            return relevant_skills(self.storage, goal)
+        except Exception as exc:
+            self.logger.log(
+                "learning_error",
+                {"error": f"{type(exc).__name__}: {exc}"},
+            )
+            return []
 
     def _workflow_error(
         self,

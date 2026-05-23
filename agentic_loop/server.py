@@ -1,12 +1,14 @@
 import argparse
 import json
+import os
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from .factory import create_controller
+from .learning import LEARNING_MODES, approve_learning_draft, reject_learning_draft
 from .model_selection import (
     DEFAULT_INTERACTIVE_MODEL,
     DEFAULT_INTERACTIVE_PROVIDER,
@@ -18,10 +20,18 @@ from .ollama_runtime import ensure_ollama_model_available
 from .rules import RuleResolver
 from .session import AgentSession
 from .storage import SQLiteStore
-from .tools import create_default_tools
+from .tools import ToolRegistry, create_default_tools
 from .types import Message
 from .version import __version__
 from .voice import voice_page_html
+from .voice_adapters import (
+    DEFAULT_GEMINI_LIVE_MODEL,
+    GeminiLiveTokenClient,
+    GeminiLiveTokenError,
+)
+
+
+VOICE_PROVIDERS = {"auto", "browser", "gemini-live"}
 
 
 def format_sse_events(events: list[dict[str, Any]]) -> str:
@@ -58,7 +68,20 @@ class AgentServerApp:
         approval_required_roots: list[str] | None = None,
         storage: SQLiteStore | None = None,
         enable_network_tools: bool = False,
+        tools_factory: Callable[[], ToolRegistry] | None = None,
+        voice_provider: str = "auto",
+        voice_model: str | None = None,
+        gemini_api_key: str | None = None,
+        voice_token_client: GeminiLiveTokenClient | None = None,
+        learning_mode: str = "draft",
+        learning_threshold: int = 2,
     ):
+        if voice_provider not in VOICE_PROVIDERS:
+            allowed = ", ".join(sorted(VOICE_PROVIDERS))
+            raise ValueError(f"voice_provider must be one of: {allowed}")
+        if learning_mode not in LEARNING_MODES:
+            allowed = ", ".join(sorted(LEARNING_MODES))
+            raise ValueError(f"learning_mode must be one of: {allowed}")
         self.workspace = workspace
         self.memory_path = memory_path
         self.trace_path = trace_path
@@ -75,13 +98,27 @@ class AgentServerApp:
         self.write_roots = write_roots
         self.approval_required_roots = approval_required_roots
         self.enable_network_tools = enable_network_tools
+        self.voice_provider = voice_provider
+        self.voice_model = voice_model or DEFAULT_GEMINI_LIVE_MODEL
+        self.learning_mode = learning_mode
+        self.learning_threshold = learning_threshold
+        self.gemini_api_key = (
+            gemini_api_key
+            or os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+        )
+        self.voice_token_client = voice_token_client or GeminiLiveTokenClient(
+            api_key=self.gemini_api_key,
+            model=self.voice_model,
+        )
+        self.tools_factory = tools_factory or (
+            lambda: create_default_tools(enable_network=enable_network_tools)
+        )
         self.storage = storage or SQLiteStore(db_path or ".agentic/agentic.db")
         self.sessions: dict[str, AgentSession] = {}
         self.session_workflows: dict[str, str] = {}
         self.session_model_selections: dict[str, ModelSelection] = {}
-        self.storage.seed_tool_registry(
-            create_default_tools(enable_network=enable_network_tools).metadata()
-        )
+        self.storage.seed_tool_registry(self._create_tools().metadata())
         self.storage.seed_default_ui_registry()
         self.storage.seed_default_rule_registry()
         self.storage.seed_default_workflow_registry()
@@ -143,6 +180,9 @@ class AgentServerApp:
             approval_required_roots=self.approval_required_roots,
             storage=self.storage,
             enable_network_tools=self.enable_network_tools,
+            tools=self._create_tools(),
+            learning_mode=self.learning_mode,
+            learning_threshold=self.learning_threshold,
         )
 
     def _make_session(
@@ -207,6 +247,29 @@ class AgentServerApp:
     def memory_records(self) -> list[dict[str, Any]]:
         return [record.__dict__ for record in self.storage.all()]
 
+    def learning_drafts(self, status: str | None = "draft") -> list[dict[str, Any]]:
+        return self.storage.list_learning_drafts(status=status)
+
+    def approve_learning_draft(self, draft_id: int) -> dict[str, Any]:
+        return approve_learning_draft(self.storage, draft_id)
+
+    def reject_learning_draft(self, draft_id: int) -> dict[str, Any]:
+        return reject_learning_draft(self.storage, draft_id)
+
+    def skills(self, status: str | None = "active") -> list[dict[str, Any]]:
+        return self.storage.list_skills(status=status)
+
+    def skill(self, key: str) -> dict[str, Any]:
+        item = self.storage.get_skill(key)
+        if item is None:
+            raise KeyError(f"unknown skill: {key}")
+        return item
+
+    def archive_skill(self, key: str) -> dict[str, Any]:
+        archived = self.storage.archive_skill(key)
+        self.storage.record_event("skill_archived", {"skill_key": key})
+        return archived
+
     def tool_registry(self) -> list[dict[str, Any]]:
         return self.storage.list_tool_registry()
 
@@ -218,6 +281,9 @@ class AgentServerApp:
 
     def workflow_registry(self) -> list[dict[str, Any]]:
         return [workflow.to_dict() for workflow in self.rule_resolver.workflows()]
+
+    def _create_tools(self) -> ToolRegistry:
+        return self.tools_factory()
 
     def model_registry(self, session_id: str | None = None) -> dict[str, Any]:
         current = (
@@ -296,7 +362,7 @@ class AgentServerApp:
             raise ValueError(f"Workflow {workflow.command} is disabled.")
         missing_tools = sorted(
             set(workflow.required_tools)
-            - create_default_tools(enable_network=self.enable_network_tools).names()
+            - self._create_tools().names()
         )
         if missing_tools:
             missing = ", ".join(missing_tools)
@@ -314,6 +380,37 @@ class AgentServerApp:
             "workflow": workflow.to_dict(),
             "active": True,
         }
+
+    def voice_config(self) -> dict[str, Any]:
+        live_requested = self.voice_provider in {"auto", "gemini-live"}
+        live_available = live_requested and self.voice_token_client.available()
+        if self.voice_provider == "browser":
+            unavailable_reason = "Server started with --voice-provider browser."
+        else:
+            unavailable_reason = self.voice_token_client.unavailable_reason()
+        selected_provider = "gemini-live" if live_available else "browser-web-speech"
+        return {
+            "voice_provider": self.voice_provider,
+            "selected_provider": selected_provider,
+            "live_available": live_available,
+            "fallback_available": True,
+            "gemini_live_model": self.voice_model,
+            "unavailable_reason": None if live_available else unavailable_reason,
+        }
+
+    def create_voice_token(
+        self,
+        purpose: str,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.voice_provider == "browser":
+            raise GeminiLiveTokenError(
+                "Gemini Live voice is disabled by --voice-provider browser."
+            )
+        session_id, _session = self.get_session(session_id)
+        payload = self.voice_token_client.create_token(purpose, session_id=session_id)
+        payload["session_id"] = session_id
+        return payload
 
 
 def serialize_result(result, model_selection: ModelSelection | None = None) -> dict[str, Any]:
@@ -339,6 +436,9 @@ def make_handler(app: AgentServerApp):
             parsed = urlparse(self.path)
             if parsed.path in {"/", "/voice"}:
                 self._send_html(voice_page_html(__version__))
+                return
+            if parsed.path == "/voice/config":
+                self._send_json(app.voice_config())
                 return
             if parsed.path == "/health":
                 self._send_json({"ok": True, "version": __version__})
@@ -370,6 +470,26 @@ def make_handler(app: AgentServerApp):
                 return
             if parsed.path == "/memory":
                 self._send_json({"records": app.memory_records()})
+                return
+            if parsed.path == "/learning/drafts":
+                query = parse_qs(parsed.query)
+                status = self._first(query, "status")
+                self._send_json({"drafts": app.learning_drafts(status=status or "draft")})
+                return
+            if parsed.path == "/skills":
+                query = parse_qs(parsed.query)
+                status = self._first(query, "status")
+                self._send_json({"skills": app.skills(status=status or "active")})
+                return
+            if parsed.path.startswith("/skills/"):
+                key = parsed.path[len("/skills/"):].strip("/")
+                if not key:
+                    self._send_json({"error": "not found"}, status=404)
+                    return
+                try:
+                    self._send_json({"skill": app.skill(key)})
+                except KeyError as exc:
+                    self._send_json({"error": "KeyError", "message": str(exc)}, status=404)
                 return
             if parsed.path == "/registry/tools":
                 self._send_json({"tools": app.tool_registry()})
@@ -404,6 +524,31 @@ def make_handler(app: AgentServerApp):
                             "model": model_selection.to_dict(),
                         }
                     )
+                    return
+                if self.path == "/voice/gemini/token":
+                    purpose = body.get("purpose")
+                    if not isinstance(purpose, str) or not purpose.strip():
+                        raise ValueError("request requires purpose")
+                    self._send_json(
+                        app.create_voice_token(
+                            purpose.strip(),
+                            session_id=body.get("session_id"),
+                        )
+                    )
+                    return
+                if self.path == "/learning/drafts/approve":
+                    draft_id = self._require_int(body, "id", "draft_id")
+                    self._send_json(app.approve_learning_draft(draft_id))
+                    return
+                if self.path == "/learning/drafts/reject":
+                    draft_id = self._require_int(body, "id", "draft_id")
+                    self._send_json(app.reject_learning_draft(draft_id))
+                    return
+                if self.path == "/skills/archive":
+                    key = body.get("key") or body.get("skill")
+                    if not isinstance(key, str) or not key.strip():
+                        raise ValueError("request requires key or skill")
+                    self._send_json({"skill": app.archive_skill(key.strip())})
                     return
                 if self.path == "/chat":
                     message = self._require_message(body)
@@ -490,6 +635,18 @@ def make_handler(app: AgentServerApp):
             if not isinstance(message, str) or not message.strip():
                 raise ValueError("request requires non-empty message or goal")
             return message.strip()
+
+        def _require_int(self, body, *keys):
+            for key in keys:
+                value = body.get(key)
+                if value is None:
+                    continue
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    break
+            joined = " or ".join(keys)
+            raise ValueError(f"request requires integer {joined}")
 
         def _rule_overrides(self, body):
             enabled = []
@@ -602,6 +759,29 @@ def serve(argv=None) -> int:
         dest="enable_network_tools",
         help="Disable search_web, search_news, and fetch_url tools for the served API.",
     )
+    parser.add_argument(
+        "--voice-provider",
+        choices=sorted(VOICE_PROVIDERS),
+        default="auto",
+        help="Voice mode backend: auto uses Gemini Live when configured, else browser fallback.",
+    )
+    parser.add_argument(
+        "--voice-model",
+        default=os.environ.get("AGENTIC_LOOP_GEMINI_LIVE_MODEL") or DEFAULT_GEMINI_LIVE_MODEL,
+        help="Gemini Live model used for realtime browser voice.",
+    )
+    parser.add_argument(
+        "--learning",
+        choices=sorted(LEARNING_MODES),
+        default="draft",
+        help="Learning loop mode. Draft records suggestions without auto-activating skills.",
+    )
+    parser.add_argument(
+        "--learning-threshold",
+        type=int,
+        default=2,
+        help="Times a pattern must recur before a procedural skill draft is proposed.",
+    )
     args = parser.parse_args(argv)
 
     write_roots = ["outputs", *args.write_root]
@@ -632,6 +812,10 @@ def serve(argv=None) -> int:
         write_roots=write_roots,
         approval_required_roots=args.approval_root,
         enable_network_tools=args.enable_network_tools,
+        voice_provider=args.voice_provider,
+        voice_model=args.voice_model,
+        learning_mode=args.learning,
+        learning_threshold=args.learning_threshold,
     )
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     print(f"agentic-loop serving on http://{args.host}:{args.port}")

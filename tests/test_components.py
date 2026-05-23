@@ -21,6 +21,7 @@ from agentic_loop import (
 )
 from agentic_loop.context import ContextBuilder
 from agentic_loop.factory import create_controller
+from agentic_loop.learning import approve_learning_draft, reflect_experience
 from agentic_loop.model_selection import (
     DEFAULT_INTERACTIVE_MODEL,
     ModelSelection,
@@ -29,6 +30,7 @@ from agentic_loop.model_selection import (
     render_model_selection,
 )
 from agentic_loop.server import AgentServerApp, serialize_result
+from agentic_loop.skills import render_skill_markdown
 from agentic_loop.tools import Tool, ToolContext
 from agentic_loop.types import AgentState, AgentStep, Message
 
@@ -184,6 +186,158 @@ class ComponentCoverageTest(unittest.TestCase):
         self.assertIn("academic", content)
         self.assertIn("Use careful sourcing language.", content)
 
+    def test_context_builder_includes_relevant_skill_metadata_and_markdown(self):
+        state = AgentState(goal="Inspect this dataset.")
+        markdown = render_skill_markdown(
+            key="inspect-dataset",
+            title="Inspect Dataset",
+            description="Use inspect_csv when a user asks about tabular data.",
+            triggers=["dataset", "inspect_csv"],
+            procedure=["Run inspect_csv.", "Summarize rows and columns."],
+        )
+
+        content = ContextBuilder().state_message(
+            state,
+            active_skills=[
+                {
+                    "key": "inspect-dataset",
+                    "title": "Inspect Dataset",
+                    "description": "Use inspect_csv when a user asks about tabular data.",
+                    "triggers": ["dataset", "inspect_csv"],
+                    "markdown": markdown,
+                    "status": "active",
+                }
+            ],
+        ).content
+
+        self.assertIn("Relevant skills:", content)
+        self.assertIn("inspect-dataset", content)
+        self.assertIn("## Procedure", content)
+
+    def test_reflection_stays_conservative_without_repeatable_tool_pattern(self):
+        reflection = reflect_experience(
+            {
+                "run_id": "r1",
+                "goal": "Say hello.",
+                "outcome": "success",
+                "tools": [],
+                "evaluation": {"has_final_answer": True},
+            },
+            recurrence_count=5,
+            threshold=2,
+        )
+
+        self.assertIsNone(reflection.candidate_skill)
+        self.assertEqual(reflection.outcome, "success")
+
+    def test_reflection_can_propose_safe_preference_memory(self):
+        reflection = reflect_experience(
+            {
+                "run_id": "r1",
+                "goal": "I prefer concise final answers.",
+                "outcome": "success",
+                "tools": [],
+                "evaluation": {"has_final_answer": True},
+            },
+            recurrence_count=1,
+            threshold=2,
+        )
+
+        self.assertIsNotNone(reflection.candidate_memory)
+        self.assertEqual(reflection.candidate_memory["value"]["kind"], "preference")
+
+    def test_sqlite_learning_storage_approval_and_archive_flow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = SQLiteStore(Path(tmp) / "agentic.db")
+            markdown = render_skill_markdown(
+                key="release-checklist",
+                title="Release Checklist",
+                description="Prepare releases safely.",
+                triggers=["release", "changelog"],
+                procedure=["Check tests.", "Push the intended branch."],
+            )
+            draft = storage.create_learning_draft(
+                draft_type="skill",
+                title="Release Checklist",
+                key="release-checklist",
+                payload={
+                    "key": "release-checklist",
+                    "title": "Release Checklist",
+                    "description": "Prepare releases safely.",
+                    "triggers": ["release", "changelog"],
+                    "markdown": markdown,
+                    "source_run_ids": ["run_release"],
+                },
+                source_run_id="run_release",
+            )
+
+            approved = approve_learning_draft(storage, draft["id"])
+            skill = storage.get_skill("release-checklist")
+            archived = storage.archive_skill("release-checklist")
+            reopened = SQLiteStore(Path(tmp) / "agentic.db")
+
+            self.assertEqual(approved["draft"]["status"], "approved")
+            self.assertIsNotNone(skill)
+            self.assertEqual(skill["status"], "active")
+            self.assertEqual(archived["status"], "archived")
+            self.assertEqual(reopened.get_skill("release-checklist")["status"], "archived")
+
+    def test_learning_records_experience_and_respects_threshold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = create_controller(
+                workspace=SAMPLE_WORKSPACE,
+                db_path=Path(tmp) / "agentic.db",
+                provider="rule",
+                learning_threshold=2,
+            )
+
+            result = controller.run("Inspect data/sample.csv as a dataset.", session_id="s1")
+            experiences = controller.storage.list_experiences()
+            drafts = controller.storage.list_learning_drafts()
+            events = controller.storage.events_after(session_id="s1")
+
+            self.assertIn("4 row(s)", result.final_answer)
+            self.assertEqual(len(experiences), 1)
+            self.assertEqual(experiences[0]["outcome"], "success")
+            self.assertEqual(drafts, [])
+            self.assertIn("experience_recorded", [event["event_type"] for event in events])
+
+    def test_learning_creates_skill_draft_and_reuses_approved_skill(self):
+        class CapturingModel:
+            def __init__(self):
+                self.messages = []
+
+            def respond(self, messages, tools, state_summary):
+                self.messages = messages
+                return ModelResponse.final("done")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "agentic.db"
+            first = create_controller(
+                workspace=SAMPLE_WORKSPACE,
+                db_path=db_path,
+                provider="rule",
+                learning_threshold=1,
+            )
+            first.run("Inspect data/sample.csv as a dataset.", session_id="s1")
+            draft = first.storage.list_learning_drafts()[0]
+            approved = approve_learning_draft(first.storage, draft["id"])
+
+            model = CapturingModel()
+            second = create_controller(
+                workspace=SAMPLE_WORKSPACE,
+                db_path=db_path,
+                provider="rule",
+                model=model,
+            )
+            second.run("Inspect another dataset.", session_id="s2")
+            combined = "\n".join(message.content for message in model.messages)
+
+            self.assertEqual(approved["skill"]["status"], "active")
+            self.assertIn("Relevant skills:", combined)
+            self.assertIn(approved["skill"]["key"], combined)
+            self.assertEqual(first.storage.list_skill_uses(approved["skill"]["key"])[0]["outcome"], "success")
+
     def test_tool_registry_rejects_duplicate_tools_and_unknown_runs(self):
         registry = ToolRegistry()
         tool = Tool(
@@ -198,6 +352,68 @@ class ComponentCoverageTest(unittest.TestCase):
             registry.register(tool)
         with self.assertRaisesRegex(KeyError, "unknown tool"):
             registry.run("missing", ToolContext(workspace_root=SAMPLE_WORKSPACE), {})
+
+    def test_create_controller_accepts_host_tool_registry_and_context_metadata(self):
+        registry = ToolRegistry()
+        registry.register(
+            Tool(
+                name="host_echo",
+                description="Echo host metadata.",
+                parameters={"type": "object", "properties": {}, "required": []},
+                handler=lambda context, arguments: {
+                    "session_path": context.metadata["session_path"],
+                    "workspace": str(context.workspace_root),
+                },
+            )
+        )
+        model = ScriptedModel(
+            [
+                ModelResponse.call("host_echo", {}, "call_host_echo"),
+                ModelResponse.final("done"),
+            ]
+        )
+        context = ToolContext(
+            workspace_root=SAMPLE_WORKSPACE,
+            metadata={"session_path": "sessions/abc"},
+        )
+
+        controller = create_controller(
+            workspace=SAMPLE_WORKSPACE,
+            model=model,
+            tools=registry,
+            tool_context=context,
+            db_path=None,
+        )
+        result = controller.run("Use the host tool.")
+
+        self.assertEqual(result.final_answer, "done")
+        self.assertEqual(result.state.steps[0].tool_name, "host_echo")
+        self.assertEqual(result.state.steps[0].observation["session_path"], "sessions/abc")
+        self.assertEqual(context.memory, controller.memory)
+
+    def test_server_app_accepts_host_tools_factory(self):
+        def host_tools() -> ToolRegistry:
+            registry = ToolRegistry()
+            registry.register(
+                Tool(
+                    name="host_status",
+                    description="Return host status.",
+                    parameters={"type": "object", "properties": {}, "required": []},
+                    handler=lambda context, arguments: {"ok": True},
+                )
+            )
+            return registry
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+                tools_factory=host_tools,
+            )
+
+            names = {tool["name"] for tool in app.tool_registry()}
+
+        self.assertEqual(names, {"host_status"})
 
     def test_default_tool_metadata_has_ui_and_risk_hints(self):
         metadata = {item["name"]: item for item in create_default_tools(enable_network=True).metadata()}
@@ -429,4 +645,3 @@ class ComponentCoverageTest(unittest.TestCase):
 
         self.assertEqual(result.state.steps[0].tool_name, "list_files")
         self.assertEqual(result.final_answer, "done")
-

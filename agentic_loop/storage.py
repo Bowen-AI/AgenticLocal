@@ -2,8 +2,9 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .memory import MemoryRecord
 from .rules import default_rule_metadata, default_workflow_metadata
@@ -29,10 +30,15 @@ class SQLiteStore:
         self._lock = threading.RLock()
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
 
     def _init_schema(self) -> None:
         with self._lock, self._connect() as connection:
@@ -147,6 +153,53 @@ class SQLiteStore:
                     prompt_prefix TEXT NOT NULL,
                     enabled INTEGER NOT NULL,
                     updated_at_unix REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS experiences (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL UNIQUE,
+                    session_id TEXT,
+                    goal TEXT NOT NULL,
+                    outcome TEXT NOT NULL,
+                    signature TEXT NOT NULL,
+                    summary_json TEXT NOT NULL,
+                    created_at_unix REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS learning_drafts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    draft_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    key TEXT,
+                    payload_json TEXT NOT NULL,
+                    source_run_id TEXT,
+                    created_at_unix REAL NOT NULL,
+                    updated_at_unix REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS skills (
+                    key TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    triggers_json TEXT NOT NULL,
+                    markdown TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    source_run_ids_json TEXT NOT NULL,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    created_at_unix REAL NOT NULL,
+                    updated_at_unix REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS skill_uses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    skill_key TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    session_id TEXT,
+                    outcome TEXT NOT NULL,
+                    created_at_unix REAL NOT NULL,
+                    FOREIGN KEY(skill_key) REFERENCES skills(key)
                 );
                 """
             )
@@ -347,7 +400,7 @@ class SQLiteStore:
             "created_at_unix": row["created_at_unix"],
         }
 
-    def remember(self, key: str, value: Any) -> MemoryRecord:
+    def remember(self, key: str, value: Any, source: str = "tool") -> MemoryRecord:
         record = MemoryRecord(key=key, value=value, created_at_unix=time.time())
         with self._lock, self._connect() as connection:
             connection.execute(
@@ -355,7 +408,7 @@ class SQLiteStore:
                 INSERT INTO memory(key, value_json, created_at_unix, source)
                 VALUES(?, ?, ?, ?)
                 """,
-                (record.key, _json_dumps(record.value), record.created_at_unix, "tool"),
+                (record.key, _json_dumps(record.value), record.created_at_unix, source),
             )
         return record
 
@@ -405,6 +458,365 @@ class SQLiteStore:
             if query_lower in haystack:
                 matches.append(record)
         return matches[-limit:]
+
+    def record_experience(self, summary: dict[str, Any]) -> dict[str, Any]:
+        now = time.time()
+        run_id = str(summary["run_id"])
+        session_id = summary.get("session_id")
+        goal = str(summary.get("goal") or "")
+        outcome = str(summary.get("outcome") or "unknown")
+        signature = str(summary.get("signature") or "")
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO experiences(
+                    run_id, session_id, goal, outcome, signature,
+                    summary_json, created_at_unix
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    session_id = excluded.session_id,
+                    goal = excluded.goal,
+                    outcome = excluded.outcome,
+                    signature = excluded.signature,
+                    summary_json = excluded.summary_json
+                """,
+                (run_id, session_id, goal, outcome, signature, _json_dumps(summary), now),
+            )
+        stored = dict(summary)
+        stored["created_at_unix"] = now
+        return stored
+
+    def list_experiences(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT run_id, session_id, goal, outcome, signature,
+                       summary_json, created_at_unix
+                FROM experiences
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [self._experience_from_row(row) for row in rows]
+
+    def count_experiences_by_signature(self, signature: str) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM experiences WHERE signature = ?",
+                (signature,),
+            ).fetchone()
+        return int(row["count"] if row is not None else 0)
+
+    def _experience_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        summary = _json_loads(row["summary_json"], {})
+        if not isinstance(summary, dict):
+            summary = {}
+        summary.update(
+            {
+                "run_id": row["run_id"],
+                "session_id": row["session_id"],
+                "goal": row["goal"],
+                "outcome": row["outcome"],
+                "signature": row["signature"],
+                "created_at_unix": row["created_at_unix"],
+            }
+        )
+        return summary
+
+    def create_learning_draft(
+        self,
+        draft_type: str,
+        title: str,
+        key: str | None,
+        payload: dict[str, Any],
+        source_run_id: str | None = None,
+    ) -> dict[str, Any]:
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO learning_drafts(
+                    draft_type, status, title, key, payload_json,
+                    source_run_id, created_at_unix, updated_at_unix
+                )
+                VALUES(?, 'draft', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    draft_type,
+                    title,
+                    key,
+                    _json_dumps(payload),
+                    source_run_id,
+                    now,
+                    now,
+                ),
+            )
+            draft_id = cursor.lastrowid
+        return {
+            "id": draft_id,
+            "draft_type": draft_type,
+            "status": "draft",
+            "title": title,
+            "key": key,
+            "payload": payload,
+            "source_run_id": source_run_id,
+            "created_at_unix": now,
+            "updated_at_unix": now,
+        }
+
+    def list_learning_drafts(
+        self,
+        status: str | None = "draft",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        where = ""
+        if status is not None:
+            where = "WHERE status = ?"
+            params.append(status)
+        params.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT id, draft_type, status, title, key, payload_json,
+                       source_run_id, created_at_unix, updated_at_unix
+                FROM learning_drafts
+                {where}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [self._learning_draft_from_row(row) for row in rows]
+
+    def get_learning_draft(self, draft_id: int) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, draft_type, status, title, key, payload_json,
+                       source_run_id, created_at_unix, updated_at_unix
+                FROM learning_drafts
+                WHERE id = ?
+                """,
+                (draft_id,),
+            ).fetchone()
+        return self._learning_draft_from_row(row) if row is not None else None
+
+    def update_learning_draft_status(self, draft_id: int, status: str) -> dict[str, Any]:
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE learning_drafts
+                SET status = ?, updated_at_unix = ?
+                WHERE id = ?
+                """,
+                (status, now, draft_id),
+            )
+        updated = self.get_learning_draft(draft_id)
+        if updated is None:
+            raise KeyError(f"unknown learning draft: {draft_id}")
+        return updated
+
+    def _learning_draft_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "draft_type": row["draft_type"],
+            "status": row["status"],
+            "title": row["title"],
+            "key": row["key"],
+            "payload": _json_loads(row["payload_json"], {}),
+            "source_run_id": row["source_run_id"],
+            "created_at_unix": row["created_at_unix"],
+            "updated_at_unix": row["updated_at_unix"],
+        }
+
+    def upsert_skill(
+        self,
+        key: str,
+        title: str,
+        description: str,
+        triggers: list[str],
+        markdown: str,
+        status: str = "active",
+        source_run_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        now = time.time()
+        existing = self.get_skill(key)
+        created_at = existing["created_at_unix"] if existing else now
+        merged_source_ids = []
+        for source_id in (existing or {}).get("source_run_ids", []) + (source_run_ids or []):
+            if source_id and source_id not in merged_source_ids:
+                merged_source_ids.append(source_id)
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO skills(
+                    key, title, description, triggers_json, markdown, status,
+                    source_run_ids_json, success_count, failure_count,
+                    created_at_unix, updated_at_unix
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    title = excluded.title,
+                    description = excluded.description,
+                    triggers_json = excluded.triggers_json,
+                    markdown = excluded.markdown,
+                    status = excluded.status,
+                    source_run_ids_json = excluded.source_run_ids_json,
+                    updated_at_unix = excluded.updated_at_unix
+                """,
+                (
+                    key,
+                    title,
+                    description,
+                    _json_dumps(triggers),
+                    markdown,
+                    status,
+                    _json_dumps(merged_source_ids),
+                    int((existing or {}).get("success_count") or 0),
+                    int((existing or {}).get("failure_count") or 0),
+                    created_at,
+                    now,
+                ),
+            )
+        return self.get_skill(key) or {}
+
+    def list_skills(
+        self,
+        status: str | None = "active",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        where = ""
+        if status is not None:
+            where = "WHERE status = ?"
+            params.append(status)
+        params.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT key, title, description, triggers_json, markdown, status,
+                       source_run_ids_json, success_count, failure_count,
+                       created_at_unix, updated_at_unix
+                FROM skills
+                {where}
+                ORDER BY updated_at_unix DESC, key ASC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [self._skill_from_row(row) for row in rows]
+
+    def get_skill(self, key: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT key, title, description, triggers_json, markdown, status,
+                       source_run_ids_json, success_count, failure_count,
+                       created_at_unix, updated_at_unix
+                FROM skills
+                WHERE key = ?
+                """,
+                (key,),
+            ).fetchone()
+        return self._skill_from_row(row) if row is not None else None
+
+    def archive_skill(self, key: str) -> dict[str, Any]:
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE skills
+                SET status = 'archived', updated_at_unix = ?
+                WHERE key = ?
+                """,
+                (now, key),
+            )
+        archived = self.get_skill(key)
+        if archived is None:
+            raise KeyError(f"unknown skill: {key}")
+        return archived
+
+    def record_skill_use(
+        self,
+        skill_key: str,
+        run_id: str,
+        session_id: str | None,
+        outcome: str,
+    ) -> dict[str, Any]:
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO skill_uses(skill_key, run_id, session_id, outcome, created_at_unix)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (skill_key, run_id, session_id, outcome, now),
+            )
+            use_id = cursor.lastrowid
+        return {
+            "id": use_id,
+            "skill_key": skill_key,
+            "run_id": run_id,
+            "session_id": session_id,
+            "outcome": outcome,
+            "created_at_unix": now,
+        }
+
+    def increment_skill_result(self, key: str, success: bool) -> dict[str, Any]:
+        now = time.time()
+        column = "success_count" if success else "failure_count"
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                f"""
+                UPDATE skills
+                SET {column} = {column} + 1, updated_at_unix = ?
+                WHERE key = ?
+                """,
+                (now, key),
+            )
+        updated = self.get_skill(key)
+        if updated is None:
+            raise KeyError(f"unknown skill: {key}")
+        return updated
+
+    def list_skill_uses(self, skill_key: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        where = ""
+        if skill_key is not None:
+            where = "WHERE skill_key = ?"
+            params.append(skill_key)
+        params.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT id, skill_key, run_id, session_id, outcome, created_at_unix
+                FROM skill_uses
+                {where}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _skill_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "key": row["key"],
+            "title": row["title"],
+            "description": row["description"],
+            "triggers": _json_loads(row["triggers_json"], []),
+            "markdown": row["markdown"],
+            "status": row["status"],
+            "source_run_ids": _json_loads(row["source_run_ids_json"], []),
+            "success_count": row["success_count"],
+            "failure_count": row["failure_count"],
+            "created_at_unix": row["created_at_unix"],
+            "updated_at_unix": row["updated_at_unix"],
+        }
 
     def seed_tool_registry(self, metadata: list[dict[str, Any]]) -> None:
         now = time.time()
@@ -474,6 +886,10 @@ class SQLiteStore:
             ("tool_error", "error_panel", "Render tool execution errors."),
             ("state_delta", "state_panel", "Render compact working-state changes."),
             ("memory_written", "memory_view", "Render long-term memory writes."),
+            ("experience_recorded", "tool_timeline_row", "Show when a completed run was summarized."),
+            ("learning_draft_created", "tool_timeline_row", "Show proposed learning artifacts."),
+            ("skill_approved", "memory_view", "Render approved procedural skills."),
+            ("skill_used", "tool_timeline_row", "Show procedural skills reused for a run."),
             ("final_answer", "chat_message", "Render the assistant response."),
             ("list_files", "file_browser", "Render workspace file listings."),
             ("inspect_csv", "table_preview", "Render dataset previews and summaries."),
@@ -492,7 +908,10 @@ class SQLiteStore:
                     enabled = excluded.enabled,
                     updated_at_unix = excluded.updated_at_unix
                 """,
-                [(event_type, component, description, 1, now) for event_type, component, description in defaults],
+                [
+                    (event_type, component, description, 1, now)
+                    for event_type, component, description in defaults
+                ],
             )
 
     def list_ui_registry(self) -> list[dict[str, Any]]:

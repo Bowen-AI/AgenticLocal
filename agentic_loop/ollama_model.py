@@ -17,11 +17,13 @@ class OllamaChatModel:
         host: str = "http://127.0.0.1:11434",
         timeout_s: float = 120.0,
         use_tools: bool = True,
+        think: bool | str | None = False,
     ):
         self.model = model
         self.host = host.rstrip("/")
         self.timeout_s = timeout_s
         self.use_tools = use_tools
+        self.think = think
 
     def respond(
         self,
@@ -34,6 +36,8 @@ class OllamaChatModel:
             "messages": self._messages(messages),
             "stream": False,
         }
+        if self.think is not None:
+            payload["think"] = self.think
         if self.use_tools and tools:
             payload["tools"] = [self._tool_schema(tool) for tool in tools]
 

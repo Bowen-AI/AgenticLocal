@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,9 @@ from agentic_loop import (
     AgentController,
     AgentSession,
     BrowserSpeechVoiceAdapter,
+    GeminiLiveTokenClient,
+    GeminiLiveTokenError,
+    GeminiLiveVoiceAdapter,
     JsonlMemory,
     ModelSelection,
     ModelResponse,
@@ -29,7 +33,8 @@ from agentic_loop.ollama_model import OllamaChatModel
 from agentic_loop.ollama_runtime import ensure_ollama_model_available, ollama_model_installed
 from agentic_loop.factory import create_controller
 from agentic_loop.model_selection import DEFAULT_INTERACTIVE_MODEL, parse_model_command
-from agentic_loop.server import AgentServerApp, format_sse_events, serve as serve_command
+from agentic_loop.server import AgentServerApp, format_sse_events, make_handler, serve as serve_command
+from agentic_loop.skills import render_skill_markdown
 from agentic_loop.tools import ToolContext
 from agentic_loop.voice import voice_page_html
 
@@ -64,6 +69,36 @@ class FakeWebClient:
               </item>
             </channel></rss>"""
         return "<html><head><title>Example Page</title></head><body>Hello from a fetched page.</body></html>"
+
+
+class FakeGeminiTokenClient:
+    def __init__(self, available=True):
+        self.available_value = available
+        self.calls = []
+
+    def available(self):
+        return self.available_value
+
+    def unavailable_reason(self):
+        if self.available_value:
+            return None
+        return "fake token client unavailable"
+
+    def create_token(self, purpose, session_id=None):
+        self.calls.append((purpose, session_id))
+        return {
+            "token": f"auth_tokens/{purpose}",
+            "websocket_url": "wss://gemini.example.test/live",
+            "model": "test-live-model",
+            "purpose": purpose,
+            "session_id": session_id,
+            "expire_time": "2026-05-23T12:30:00Z",
+            "new_session_expire_time": "2026-05-23T12:01:00Z",
+            "setup": {
+                "model": "models/test-live-model",
+                "generationConfig": {"responseModalities": ["TEXT"]},
+            },
+        }
 
 
 class AgenticLoopTest(unittest.TestCase):
@@ -109,6 +144,33 @@ class AgenticLoopTest(unittest.TestCase):
             workspace_root=workspace,
             max_steps=8,
         )
+
+    def _call_handler_get(self, handler_cls, path):
+        captured = {}
+        handler = object.__new__(handler_cls)
+        handler.path = path
+        handler._send_json = lambda payload, status=200: captured.update(
+            {"payload": payload, "status": status}
+        )
+        handler._send_html = lambda html, status=200: captured.update(
+            {"html": html, "status": status}
+        )
+        handler._send_sse = lambda events, status=200: captured.update(
+            {"events": events, "status": status}
+        )
+        handler.do_GET()
+        return captured
+
+    def _call_handler_post(self, handler_cls, path, body):
+        captured = {}
+        handler = object.__new__(handler_cls)
+        handler.path = path
+        handler._read_json = lambda: body
+        handler._send_json = lambda payload, status=200: captured.update(
+            {"payload": payload, "status": status}
+        )
+        handler.do_POST()
+        return captured
 
     def test_agent_lists_files_through_tool_loop(self):
         result = self.make_controller().run("List files in the workspace.")
@@ -329,7 +391,10 @@ class AgenticLoopTest(unittest.TestCase):
 
     def test_ollama_model_parses_tool_call(self):
         class FakeOllama(OllamaChatModel):
+            payload = None
+
             def _post(self, path, payload):
+                self.__class__.payload = payload
                 return {
                     "message": {
                         "role": "assistant",
@@ -348,6 +413,20 @@ class AgenticLoopTest(unittest.TestCase):
         response = FakeOllama(model="test-model").respond([], create_default_tools().schemas(), "")
         self.assertEqual(response.tool_call.name, "inspect_csv")
         self.assertEqual(response.tool_call.arguments["path"], "data/sample.csv")
+        self.assertIs(FakeOllama.payload["think"], False)
+
+    def test_ollama_model_can_enable_thinking(self):
+        class FakeOllama(OllamaChatModel):
+            payload = None
+
+            def _post(self, path, payload):
+                self.__class__.payload = payload
+                return {"message": {"role": "assistant", "content": "OK"}}
+
+        response = FakeOllama(model="test-model", think="low").respond([], [], "")
+
+        self.assertEqual(response.final_answer, "OK")
+        self.assertEqual(FakeOllama.payload["think"], "low")
 
     def test_ollama_model_falls_back_when_tools_not_supported(self):
         class FakeOllama(OllamaChatModel):
@@ -623,6 +702,259 @@ class AgenticLoopTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertFalse(created_apps[0]["enable_network_tools"])
 
+    def test_serve_accepts_voice_provider_and_model(self):
+        created_apps = []
+
+        class FakeServer:
+            def __init__(self, address, handler):
+                self.address = address
+                self.handler = handler
+
+            def serve_forever(self):
+                return None
+
+        def fake_app(**kwargs):
+            created_apps.append(kwargs)
+            return object()
+
+        with redirect_stdout(StringIO()), patch(
+            "agentic_loop.server.AgentServerApp",
+            side_effect=fake_app,
+        ), patch("agentic_loop.server.ThreadingHTTPServer", FakeServer), patch(
+            "agentic_loop.server.ensure_ollama_model_available",
+            return_value=True,
+        ):
+            exit_code = serve_command(
+                [
+                    "--port",
+                    "0",
+                    "--voice-provider",
+                    "gemini-live",
+                    "--voice-model",
+                    "test-live-model",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(created_apps[0]["voice_provider"], "gemini-live")
+        self.assertEqual(created_apps[0]["voice_model"], "test-live-model")
+
+    def test_serve_accepts_learning_flags(self):
+        created_apps = []
+
+        class FakeServer:
+            def __init__(self, address, handler):
+                self.address = address
+                self.handler = handler
+
+            def serve_forever(self):
+                return None
+
+        def fake_app(**kwargs):
+            created_apps.append(kwargs)
+            return object()
+
+        with redirect_stdout(StringIO()), patch(
+            "agentic_loop.server.AgentServerApp",
+            side_effect=fake_app,
+        ), patch("agentic_loop.server.ThreadingHTTPServer", FakeServer), patch(
+            "agentic_loop.server.ensure_ollama_model_available",
+            return_value=True,
+        ):
+            exit_code = serve_command(
+                [
+                    "--port",
+                    "0",
+                    "--learning",
+                    "off",
+                    "--learning-threshold",
+                    "5",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(created_apps[0]["learning_mode"], "off")
+        self.assertEqual(created_apps[0]["learning_threshold"], 5)
+
+    def test_server_learning_and_skill_methods(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+            )
+            markdown = render_skill_markdown(
+                key="release-checklist",
+                title="Release Checklist",
+                description="Prepare releases safely.",
+                triggers=["release", "push"],
+                procedure=["Run tests.", "Push the intended branch."],
+            )
+            draft = app.storage.create_learning_draft(
+                "skill",
+                "Release Checklist",
+                "release-checklist",
+                {
+                    "key": "release-checklist",
+                    "title": "Release Checklist",
+                    "description": "Prepare releases safely.",
+                    "triggers": ["release", "push"],
+                    "markdown": markdown,
+                    "source_run_ids": ["run_release"],
+                },
+                source_run_id="run_release",
+            )
+
+            listed = app.learning_drafts()
+            approved = app.approve_learning_draft(draft["id"])
+            archived = app.archive_skill("release-checklist")
+
+            self.assertEqual(listed[0]["id"], draft["id"])
+            self.assertEqual(approved["skill"]["key"], "release-checklist")
+            self.assertIn("## Procedure", app.skill("release-checklist")["markdown"])
+            self.assertEqual(archived["status"], "archived")
+
+    def test_learning_http_routes_without_network_socket(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+            )
+            markdown = render_skill_markdown(
+                key="release-checklist",
+                title="Release Checklist",
+                description="Prepare releases safely.",
+                triggers=["release"],
+                procedure=["Run tests."],
+            )
+            draft = app.storage.create_learning_draft(
+                "skill",
+                "Release Checklist",
+                "release-checklist",
+                {
+                    "key": "release-checklist",
+                    "title": "Release Checklist",
+                    "description": "Prepare releases safely.",
+                    "triggers": ["release"],
+                    "markdown": markdown,
+                },
+                source_run_id="run_release",
+            )
+            handler_cls = make_handler(app)
+
+            drafts = self._call_handler_get(handler_cls, "/learning/drafts")
+            approved = self._call_handler_post(
+                handler_cls,
+                "/learning/drafts/approve",
+                {"id": draft["id"]},
+            )
+            skill = self._call_handler_get(handler_cls, "/skills/release-checklist")
+            archived = self._call_handler_post(
+                handler_cls,
+                "/skills/archive",
+                {"key": "release-checklist"},
+            )
+
+            self.assertEqual(drafts["payload"]["drafts"][0]["id"], draft["id"])
+            self.assertEqual(approved["payload"]["skill"]["key"], "release-checklist")
+            self.assertIn("## Procedure", skill["payload"]["skill"]["markdown"])
+            self.assertEqual(archived["payload"]["skill"]["status"], "archived")
+
+    def test_gemini_live_token_payloads_are_constrained(self):
+        now = datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc)
+        client = GeminiLiveTokenClient(
+            api_key="secret",
+            model="test-live-model",
+            now_fn=lambda: now,
+        )
+
+        input_payload = client.token_request_payload("input")
+        output_payload = client.token_request_payload("output")
+
+        self.assertEqual(input_payload["uses"], 1)
+        self.assertEqual(input_payload["expireTime"], "2026-05-23T12:30:00Z")
+        self.assertEqual(input_payload["newSessionExpireTime"], "2026-05-23T12:01:00Z")
+        self.assertEqual(
+            input_payload["bidiGenerateContentSetup"]["model"],
+            "models/test-live-model",
+        )
+        self.assertEqual(
+            input_payload["bidiGenerateContentSetup"]["generationConfig"]["responseModalities"],
+            ["TEXT"],
+        )
+        self.assertIn("inputAudioTranscription", input_payload["bidiGenerateContentSetup"])
+        self.assertEqual(
+            output_payload["bidiGenerateContentSetup"]["generationConfig"]["responseModalities"],
+            ["AUDIO"],
+        )
+        self.assertIn("outputAudioTranscription", output_payload["bidiGenerateContentSetup"])
+
+    def test_gemini_live_token_client_requires_api_key(self):
+        with patch.dict(os.environ, {}, clear=True):
+            client = GeminiLiveTokenClient()
+
+        self.assertFalse(client.available())
+        with self.assertRaises(GeminiLiveTokenError):
+            client.create_token("input")
+
+    def test_gemini_live_token_client_does_not_return_api_key(self):
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return b'{"name":"auth_tokens/test-token"}'
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        client = GeminiLiveTokenClient(
+            api_key="secret-key",
+            model="test-live-model",
+            urlopen_fn=fake_urlopen,
+        )
+        token = client.create_token("input", session_id="session-1")
+
+        self.assertEqual(token["token"], "auth_tokens/test-token")
+        self.assertEqual(token["session_id"], "session-1")
+        self.assertIn("key=secret-key", captured["url"])
+        self.assertNotIn("secret-key", json.dumps(token))
+        self.assertIn("bidiGenerateContentSetup", captured["body"])
+
+    def test_voice_config_falls_back_without_gemini_key(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+            )
+            config = app.voice_config()
+
+        self.assertFalse(config["live_available"])
+        self.assertTrue(config["fallback_available"])
+        self.assertEqual(config["selected_provider"], "browser-web-speech")
+        self.assertIn("GEMINI_API_KEY", config["unavailable_reason"])
+
+    def test_voice_config_and_token_creation_use_fake_token_client(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_client = FakeGeminiTokenClient()
+            app = AgentServerApp(
+                workspace=str(SAMPLE_WORKSPACE),
+                db_path=str(Path(tmp) / "agentic.db"),
+                voice_provider="gemini-live",
+                voice_model="test-live-model",
+                voice_token_client=fake_client,
+            )
+            config = app.voice_config()
+            token = app.create_voice_token("input")
+
+        self.assertTrue(config["live_available"])
+        self.assertEqual(config["selected_provider"], "gemini-live")
+        self.assertEqual(token["token"], "auth_tokens/input")
+        self.assertEqual(token["purpose"], "input")
+        self.assertTrue(token["session_id"])
+        self.assertEqual(fake_client.calls[0][0], "input")
+
     def test_cli_lists_model_providers(self):
         output = StringIO()
         with redirect_stdout(output):
@@ -814,12 +1146,69 @@ class AgenticLoopTest(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertIn("workflow active: /release", text)
 
+    def test_chat_learning_review_and_skill_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "agentic.db"
+            storage = SQLiteStore(db_path)
+            memory_draft = storage.create_learning_draft(
+                "memory",
+                "Remember preferred test command",
+                "preferred-test-command",
+                {"key": "preferred_test_command", "value": "python3 -m unittest"},
+                source_run_id="run_memory",
+            )
+            markdown = render_skill_markdown(
+                key="release-checklist",
+                title="Release Checklist",
+                description="Prepare releases safely.",
+                triggers=["release"],
+                procedure=["Run tests.", "Push the intended branch."],
+            )
+            storage.upsert_skill(
+                key="release-checklist",
+                title="Release Checklist",
+                description="Prepare releases safely.",
+                triggers=["release"],
+                markdown=markdown,
+            )
+            output = StringIO()
+            with redirect_stdout(output), patch(
+                "builtins.input",
+                side_effect=[
+                    "/learn",
+                    f"/learn approve {memory_draft['id']}",
+                    "/skills",
+                    "/skill release-checklist",
+                    "/skill archive release-checklist",
+                    "/exit",
+                ],
+            ):
+                exit_code = run_chat(
+                    [
+                        "--db",
+                        str(db_path),
+                        "--provider",
+                        "rule",
+                    ],
+                )
+            text = output.getvalue()
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Remember preferred test command", text)
+            self.assertIn(f"approved learning draft {memory_draft['id']}", text)
+            self.assertIn("release-checklist - Release Checklist", text)
+            self.assertIn("## Procedure", text)
+            self.assertIn("archived skill release-checklist", text)
+
     def test_voice_adapter_interface_can_be_mocked(self):
         browser = BrowserSpeechVoiceAdapter()
+        gemini = GeminiLiveVoiceAdapter("test-live-model")
         realtime = RealtimeVoiceAdapterSpec("gemini-live")
 
         self.assertIsInstance(browser, VoiceAdapter)
+        self.assertIsInstance(gemini, VoiceAdapter)
         self.assertFalse(browser.describe().realtime)
+        self.assertEqual(gemini.describe().name, "gemini-live")
         self.assertTrue(realtime.describe().realtime)
 
     def test_network_tools_are_opt_in(self):
@@ -887,9 +1276,21 @@ class AgenticLoopTest(unittest.TestCase):
         html = voice_page_html("0.1.0")
 
         self.assertIn("agentic-loop voice", html)
+        self.assertIn("Connect live", html)
+        self.assertIn("Mute", html)
+        self.assertIn("Interrupt", html)
         self.assertIn("SpeechRecognition", html)
         self.assertIn("speechSynthesis", html)
+        self.assertIn("new WebSocket", html)
+        self.assertIn("AudioContext", html)
+        self.assertIn("realtimeInput", html)
+        self.assertIn("audio/pcm;rate=16000", html)
+        self.assertIn("EventSource", html)
+        self.assertIn('fetch("/voice/config"', html)
+        self.assertIn('fetch("/voice/gemini/token"', html)
+        self.assertIn('fetch("/sessions"', html)
         self.assertIn('fetch("/chat"', html)
+        self.assertIn('"/events?follow=1', html)
         self.assertIn('fetch("/registry/rules"', html)
         self.assertIn('fetch("/workflows/start"', html)
         self.assertIn("Tool timeline", html)

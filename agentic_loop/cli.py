@@ -6,6 +6,7 @@ from pathlib import Path
 from .chat import run_chat
 from .client import run_client
 from .factory import create_controller
+from .learning import LEARNING_MODES
 from .model_selection import ModelSelection, provider_registry
 from .model import ScriptedModel
 from .ollama_runtime import ensure_ollama_model_available
@@ -40,6 +41,12 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--model", default=None)
     parser.add_argument("--ollama-host", default="http://127.0.0.1:11434")
+    parser.add_argument(
+        "--ollama-think",
+        default="false",
+        choices=["false", "true", "low", "medium", "high", "none"],
+        help="Set Ollama thinking mode. Default false keeps small local workflows responsive.",
+    )
     parser.add_argument("--api-base", default=None)
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--write-root", action="append", default=[])
@@ -52,6 +59,18 @@ def main(argv=None) -> int:
     parser.add_argument("--rule", action="append", default=[], help="Enable a rule for this run.")
     parser.add_argument("--no-rule", action="append", default=[], help="Disable a rule for this run.")
     parser.add_argument("--workflow", default=None, help="Run with a workflow preset such as loop or search.")
+    parser.add_argument(
+        "--learning",
+        choices=sorted(LEARNING_MODES),
+        default="draft",
+        help="Learning loop mode. Draft records suggestions without auto-activating skills.",
+    )
+    parser.add_argument(
+        "--learning-threshold",
+        type=int,
+        default=2,
+        help="Times a pattern must recur before a procedural skill draft is proposed.",
+    )
     parser.add_argument("--rules", action="store_true", help="List available rules.")
     parser.add_argument("--workflows", action="store_true", help="List available workflows.")
     parser.add_argument("--models", action="store_true", help="List available model providers.")
@@ -131,6 +150,7 @@ def main(argv=None) -> int:
         provider=args.provider,
         model_name=args.model,
         ollama_host=args.ollama_host,
+        ollama_think=_parse_ollama_think(args.ollama_think),
         api_base=args.api_base,
         api_key=args.api_key,
         write_roots=write_roots,
@@ -139,6 +159,8 @@ def main(argv=None) -> int:
         enabled_rule_keys=args.rule,
         disabled_rule_keys=args.no_rule,
         workflow_key=args.workflow,
+        learning_mode=args.learning,
+        learning_threshold=args.learning_threshold,
     )
     result = controller.run(args.goal)
 
@@ -158,3 +180,14 @@ def main(argv=None) -> int:
     else:
         print(result.final_answer)
     return 0
+
+
+def _parse_ollama_think(value: str):
+    normalized = value.strip().lower()
+    if normalized == "false":
+        return False
+    if normalized == "true":
+        return True
+    if normalized == "none":
+        return None
+    return normalized

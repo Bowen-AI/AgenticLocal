@@ -1,6 +1,7 @@
 import argparse
 
 from .factory import create_controller
+from .learning import LEARNING_MODES, approve_learning_draft, reject_learning_draft
 from .model_selection import (
     DEFAULT_INTERACTIVE_MODEL,
     DEFAULT_INTERACTIVE_PROVIDER,
@@ -26,6 +27,12 @@ HELP_TEXT = """Commands:
   /model provider=PROVIDER model=MODEL [api_base=URL] [api_key=KEY]
   /workflows Show workflow presets.
   /workflow KEY
+  /learn     Show pending learning drafts.
+  /learn approve ID
+  /learn reject ID
+  /skills    Show active procedural skills.
+  /skill KEY Show full skill markdown.
+  /skill archive KEY
   /loop [goal]
   /search [query]
   /release [goal]
@@ -60,6 +67,18 @@ def run_chat(argv=None) -> int:
     parser.add_argument("--rule", action="append", default=[], help="Enable a rule for chat runs.")
     parser.add_argument("--no-rule", action="append", default=[], help="Disable a rule for chat runs.")
     parser.add_argument("--workflow", default=None, help="Start chat with a workflow preset.")
+    parser.add_argument(
+        "--learning",
+        choices=sorted(LEARNING_MODES),
+        default="draft",
+        help="Learning loop mode. Draft records suggestions without auto-activating skills.",
+    )
+    parser.add_argument(
+        "--learning-threshold",
+        type=int,
+        default=2,
+        help="Times a pattern must recur before a procedural skill draft is proposed.",
+    )
     args = parser.parse_args(argv)
 
     write_roots = ["outputs", *args.write_root]
@@ -94,6 +113,8 @@ def run_chat(argv=None) -> int:
             enabled_rule_keys=args.rule,
             disabled_rule_keys=args.no_rule,
             workflow_key=args.workflow,
+            learning_mode=args.learning,
+            learning_threshold=args.learning_threshold,
         )
 
     controller = make_controller(current_model)
@@ -160,6 +181,15 @@ def run_chat(argv=None) -> int:
             continue
         if user_input == "/workflows":
             _print_workflows(controller)
+            continue
+        if user_input == "/learn" or user_input.startswith("/learn "):
+            _handle_learn_command(controller, user_input)
+            continue
+        if user_input == "/skills":
+            _print_skills(controller)
+            continue
+        if user_input.startswith("/skill "):
+            _handle_skill_command(controller, user_input)
             continue
         if user_input.startswith("/workflow "):
             requested = user_input.split(maxsplit=1)[1].strip()
@@ -248,3 +278,73 @@ def _handle_rule_command(controller, user_input: str) -> None:
     storage.set_rule_enabled(rule_key, parts[1] == "on")
     status = "on" if parts[1] == "on" else "off"
     print(f"{rule_key} {status}")
+
+
+def _handle_learn_command(controller, user_input: str) -> None:
+    storage = getattr(controller, "storage", None)
+    if storage is None:
+        print("learning commands require SQLite storage")
+        return
+    parts = user_input.split()
+    if len(parts) == 1:
+        drafts = storage.list_learning_drafts(status="draft")
+        if not drafts:
+            print("no pending learning drafts")
+            return
+        for draft in drafts:
+            print(f"{draft['id']} [{draft['draft_type']}] {draft['title']} - {draft['status']}")
+        return
+    if len(parts) != 3 or parts[1] not in {"approve", "reject"}:
+        print("usage: /learn, /learn approve ID, or /learn reject ID")
+        return
+    try:
+        draft_id = int(parts[2])
+        if parts[1] == "approve":
+            result = approve_learning_draft(storage, draft_id)
+            draft = result["draft"]
+            print(f"approved learning draft {draft['id']}: {draft['title']}")
+        else:
+            draft = reject_learning_draft(storage, draft_id)
+            print(f"rejected learning draft {draft['id']}: {draft['title']}")
+    except Exception as exc:
+        print(f"learning error: {exc}")
+
+
+def _print_skills(controller) -> None:
+    storage = getattr(controller, "storage", None)
+    if storage is None:
+        print("skills require SQLite storage")
+        return
+    skills = storage.list_skills(status="active")
+    if not skills:
+        print("no active skills")
+        return
+    for skill in skills:
+        triggers = ", ".join(skill.get("triggers") or [])
+        print(f"{skill['key']} - {skill['title']} ({triggers})")
+
+
+def _handle_skill_command(controller, user_input: str) -> None:
+    storage = getattr(controller, "storage", None)
+    if storage is None:
+        print("skills require SQLite storage")
+        return
+    parts = user_input.split(maxsplit=2)
+    if len(parts) == 3 and parts[1] == "archive":
+        key = parts[2].strip()
+        try:
+            skill = storage.archive_skill(key)
+            storage.record_event("skill_archived", {"skill_key": key})
+            print(f"archived skill {skill['key']}")
+        except Exception as exc:
+            print(f"skill error: {exc}")
+        return
+    if len(parts) != 2:
+        print("usage: /skill KEY or /skill archive KEY")
+        return
+    key = parts[1].strip()
+    skill = storage.get_skill(key)
+    if skill is None:
+        print(f"unknown skill: {key}")
+        return
+    print((skill.get("markdown") or "").rstrip())

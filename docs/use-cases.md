@@ -59,7 +59,35 @@ Memory split:
 - Long-term memory: deliberate `remember`/`recall` facts.
 - Retrieval memory: future searchable project/code/docs chunks.
 
-## 4. Research And News Assistant
+## 4. Self-Improving Local Skills
+
+Let the runtime summarize completed runs, propose draft learning artifacts, and
+reuse only approved procedural skills later.
+
+```bash
+python3 -m agentic_loop chat --learning draft
+```
+
+Inside chat:
+
+```text
+/learn
+/learn approve ID
+/skills
+/skill KEY
+```
+
+Current behavior:
+
+- Each completed run can create a sanitized `experiences` row.
+- Repeatable successful tool patterns become draft procedural skills after the
+  configured threshold.
+- Drafts stay inactive until approved.
+- Approved skill metadata is matched lexically; full skill Markdown is injected
+  only when relevant to the current goal.
+- Skill use success/failure is recorded for later review and archiving.
+
+## 5. Research And News Assistant
 
 Opt into public network tools when you want live information.
 
@@ -86,7 +114,7 @@ tool-capable model keeps asking for the same already-completed action, the
 runtime finalizes from the previous result instead of burning through the step
 limit.
 
-## 5. Human-Gated Workspace Changes
+## 6. Human-Gated Workspace Changes
 
 Use approval-required roots for outputs that should pause for review.
 
@@ -105,7 +133,7 @@ Current behavior:
 
 Future UI work can turn that event into an approval modal.
 
-## 6. Local HTTP Agent Service
+## 7. Local HTTP Agent Service
 
 Run the same runtime behind HTTP for local apps and dashboards.
 
@@ -128,8 +156,13 @@ Useful workflows:
 - GET `/registry/rules` and `/registry/workflows` for toggles and presets.
 - GET `/registry/models` to discover provider/model selection requirements.
 - GET `/voice` for the browser speech page.
+- GET `/voice/config` for realtime voice availability.
+- POST `/voice/gemini/token` to mint a short-lived Gemini Live browser token.
+- GET `/learning/drafts` and GET `/skills` for learning review.
+- POST `/learning/drafts/approve` and POST `/skills/archive` for approval and
+  hygiene.
 
-## 7. Rules, Workflows, And UI Registry
+## 8. Rules, Workflows, And UI Registry
 
 The storage layer persists tool, UI, rule, and workflow registry metadata.
 
@@ -147,23 +180,30 @@ This lets a frontend render the same runtime events as a timeline, table
 preview, file browser, memory view, modal, rule toggle, or workflow button
 without hardcoding every tool in the page.
 
-## 8. Voice Companion Around The Same Runtime
+## 9. Voice Companion Around The Same Runtime
 
 The browser voice page currently uses:
+
+```text
+Gemini Live mic/audio -> POST /chat -> Gemini Live spoken reply
+```
+
+When Gemini credentials are missing or the browser does not support the needed
+audio/WebSocket APIs, it falls back to:
 
 ```text
 Browser Web Speech API -> POST /chat -> browser speech synthesis
 ```
 
-The core architecture keeps voice as an adapter boundary, so future realtime
-providers can sit around the same policy, tools, memory, and trace system.
+The core architecture keeps voice as an adapter boundary, so realtime providers
+sit around the same policy, tools, memory, and trace system.
 
 Documented provider examples:
 
 - Gemini Live Voice.
 - OpenAI Realtime.
 
-## 9. Provider-Swappable Brain
+## 10. Provider-Swappable Brain
 
 The model interface is provider-neutral.
 
@@ -206,7 +246,7 @@ curl -s -X POST http://127.0.0.1:8765/chat \
   -d '{"message":"hello","model":{"provider":"ollama","name":"your-local-model"}}'
 ```
 
-## 10. Research Product Direction
+## 11. Research Product Direction
 
 The natural next product shape is a local-first research workspace:
 
