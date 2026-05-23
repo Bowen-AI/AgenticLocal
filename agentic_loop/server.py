@@ -14,6 +14,7 @@ from .model_selection import (
     ModelSelection,
     provider_registry,
 )
+from .ollama_runtime import ensure_ollama_model_available
 from .rules import RuleResolver
 from .session import AgentSession
 from .storage import SQLiteStore
@@ -607,6 +608,15 @@ def serve(argv=None) -> int:
     model_name = args.model
     if args.provider == DEFAULT_INTERACTIVE_PROVIDER and model_name is None:
         model_name = DEFAULT_INTERACTIVE_MODEL
+    default_model_selection = ModelSelection.from_values(
+        provider=args.provider,
+        model_name=model_name,
+        ollama_host=args.ollama_host,
+        api_base=args.api_base,
+        api_key=args.api_key,
+    )
+    if args.model is not None and not ensure_ollama_model_available(default_model_selection):
+        return 1
 
     app = AgentServerApp(
         workspace=args.workspace,
@@ -614,11 +624,11 @@ def serve(argv=None) -> int:
         trace_path=args.trace,
         db_path=args.db,
         max_steps=args.max_steps,
-        provider=args.provider,
-        model_name=model_name,
-        ollama_host=args.ollama_host,
-        api_base=args.api_base,
-        api_key=args.api_key,
+        provider=default_model_selection.provider,
+        model_name=default_model_selection.model_name,
+        ollama_host=default_model_selection.ollama_host or args.ollama_host,
+        api_base=default_model_selection.api_base,
+        api_key=default_model_selection.api_key,
         write_roots=write_roots,
         approval_required_roots=args.approval_root,
         enable_network_tools=args.enable_network_tools,

@@ -26,6 +26,7 @@ from agentic_loop import (
 from agentic_loop.cli import main as cli_main
 from agentic_loop.chat import run_chat
 from agentic_loop.ollama_model import OllamaChatModel
+from agentic_loop.ollama_runtime import ensure_ollama_model_available, ollama_model_installed
 from agentic_loop.factory import create_controller
 from agentic_loop.model_selection import DEFAULT_INTERACTIVE_MODEL, parse_model_command
 from agentic_loop.server import AgentServerApp, format_sse_events, serve as serve_command
@@ -649,6 +650,97 @@ class AgenticLoopTest(unittest.TestCase):
         self.assertIsNone(rule.model_name)
         self.assertEqual(back_to_ollama.provider, "ollama")
         self.assertEqual(back_to_ollama.model_name, DEFAULT_INTERACTIVE_MODEL)
+
+    def test_ollama_model_setup_prompts_and_pulls_missing_model(self):
+        lines = []
+        pulled = []
+        selection = ModelSelection.from_values(
+            provider="ollama",
+            model_name="qwen3.5:4b",
+            ollama_host="http://ollama.test",
+        )
+
+        available = ensure_ollama_model_available(
+            selection,
+            prompt_fn=lambda prompt: "yes",
+            print_fn=lines.append,
+            list_models_fn=lambda host: {"qwen3.5:9b"},
+            pull_model_fn=lambda model, host, print_fn: pulled.append((model, host)),
+        )
+
+        self.assertTrue(available)
+        self.assertEqual(pulled, [("qwen3.5:4b", "http://ollama.test")])
+        self.assertIn("Ollama model is not installed: qwen3.5:4b", lines)
+
+    def test_ollama_model_setup_accepts_latest_tag_alias(self):
+        self.assertTrue(ollama_model_installed("llama3.2", {"llama3.2:latest"}))
+
+    def test_cli_prompts_for_explicit_missing_ollama_model_before_run(self):
+        with patch("agentic_loop.cli.ensure_ollama_model_available", return_value=False) as ensure:
+            exit_code = cli_main(["--provider", "ollama", "--model", "missing-model", "hello"])
+
+        self.assertEqual(exit_code, 1)
+        ensure.assert_called_once()
+
+    def test_client_prompts_for_explicit_local_ollama_model_before_request(self):
+        with patch("agentic_loop.client.ensure_ollama_model_available", return_value=False) as ensure:
+            exit_code = cli_main(
+                ["client", "--provider", "ollama", "--model", "missing-model", "hello"]
+            )
+
+        self.assertEqual(exit_code, 1)
+        ensure.assert_called_once()
+
+    def test_chat_prompts_for_explicit_missing_ollama_model_before_start(self):
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "agentic_loop.chat.ensure_ollama_model_available",
+            return_value=False,
+        ) as ensure:
+            exit_code = run_chat(
+                [
+                    "--db",
+                    str(Path(tmp) / "agentic.db"),
+                    "--model",
+                    "missing-model",
+                ],
+            )
+
+        self.assertEqual(exit_code, 1)
+        ensure.assert_called_once()
+
+    def test_chat_model_switch_keeps_current_model_when_download_is_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = StringIO()
+            with redirect_stdout(output), patch(
+                "builtins.input",
+                side_effect=["/model ollama missing-model", "/model", "/exit"],
+            ), patch(
+                "agentic_loop.chat.ensure_ollama_model_available",
+                return_value=False,
+            ) as ensure:
+                exit_code = run_chat(
+                    [
+                        "--db",
+                        str(Path(tmp) / "agentic.db"),
+                        "--provider",
+                        "rule",
+                    ],
+                )
+            text = output.getvalue()
+
+            self.assertEqual(exit_code, 0)
+            ensure.assert_called_once()
+            self.assertIn("model: rule (none)", text)
+
+    def test_serve_prompts_for_explicit_missing_ollama_model_before_start(self):
+        with patch(
+            "agentic_loop.server.ensure_ollama_model_available",
+            return_value=False,
+        ) as ensure:
+            exit_code = serve_command(["--port", "0", "--model", "missing-model"])
+
+        self.assertEqual(exit_code, 1)
+        ensure.assert_called_once()
 
     def test_chat_can_show_and_switch_models(self):
         with tempfile.TemporaryDirectory() as tmp:

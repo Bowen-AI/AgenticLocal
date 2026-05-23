@@ -65,9 +65,9 @@ Start an interactive agent chat:
 python3 -m agentic_loop chat
 ```
 
-Interactive chat defaults to Ollama with `qwen3.5:9b`; run `ollama pull qwen3.5:9b`
-once if the model is not installed yet. Start it with opt-in public web/news
-tools:
+Interactive chat defaults to Ollama with `qwen3.5:9b`; when you explicitly
+choose a missing Ollama model with `--model` or `/model`, the CLI asks whether
+to download it before continuing. Start chat with opt-in public web/news tools:
 
 ```bash
 python3 -m agentic_loop chat --enable-network-tools
@@ -205,6 +205,8 @@ Inside chat, use `/rules`, `/rule on max_effort`, `/models`,
 
 When chat starts without `--provider`, it uses `--provider ollama --model qwen3.5:9b`.
 Use `--provider rule` for deterministic offline demos and tool-loop tests.
+Explicit Ollama model choices in chat, one-shot runs, serving, and local client
+requests prompt to download the model first when it is not already installed.
 
 ## Verification
 

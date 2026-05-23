@@ -194,6 +194,8 @@ Or switch inside an interactive chat session:
 
 Interactive chat defaults to Ollama `qwen3.5:9b`. The `rule` provider is still
 available for deterministic offline tests and demos.
+Explicit missing Ollama models selected with `--model` or `/model` prompt for a
+download before terminal entry points switch to them.
 
 Served runs can choose the provider/model per request:
 

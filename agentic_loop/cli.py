@@ -6,8 +6,9 @@ from pathlib import Path
 from .chat import run_chat
 from .client import run_client
 from .factory import create_controller
-from .model_selection import provider_registry
+from .model_selection import ModelSelection, provider_registry
 from .model import ScriptedModel
+from .ollama_runtime import ensure_ollama_model_available
 from .rules import RuleResolver
 from .server import serve
 from .storage import SQLiteStore
@@ -109,6 +110,17 @@ def main(argv=None) -> int:
         )
 
     write_roots = ["outputs", *args.write_root]
+    if model is None and args.provider == "ollama" and args.model is not None:
+        model_selection = ModelSelection.from_values(
+            provider=args.provider,
+            model_name=args.model,
+            ollama_host=args.ollama_host,
+            api_base=args.api_base,
+            api_key=args.api_key,
+        )
+        if not ensure_ollama_model_available(model_selection):
+            return 1
+
     controller = create_controller(
         workspace=workspace,
         memory_path=args.memory,

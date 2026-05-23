@@ -1,8 +1,10 @@
 import argparse
 import json
 import urllib.request
+from urllib.parse import urlparse
 
-from .model_selection import provider_registry
+from .model_selection import DEFAULT_OLLAMA_HOST, ModelSelection, provider_registry
+from .ollama_runtime import ensure_ollama_model_available
 
 
 def run_client(argv=None) -> int:
@@ -50,6 +52,18 @@ def run_client(argv=None) -> int:
             "api_base": args.api_base,
             "api_key": args.api_key,
         }
+    if (
+        args.provider == "ollama"
+        and args.model is not None
+        and _should_preflight_ollama(base_url, args.ollama_host)
+    ):
+        model_selection = ModelSelection.from_values(
+            provider="ollama",
+            model_name=args.model,
+            ollama_host=args.ollama_host or DEFAULT_OLLAMA_HOST,
+        )
+        if not ensure_ollama_model_available(model_selection):
+            return 1
 
     response = _post_json(f"{base_url}/{args.endpoint}", payload)
     if args.json:
@@ -88,6 +102,13 @@ def _drop_none(value):
     if isinstance(value, list):
         return [_drop_none(item) for item in value]
     return value
+
+
+def _should_preflight_ollama(server_url: str, ollama_host: str | None) -> bool:
+    if ollama_host:
+        return True
+    host = (urlparse(server_url).hostname or "").lower()
+    return host in {"", "localhost", "127.0.0.1", "::1"}
 
 
 def _render_models(payload: dict) -> str:

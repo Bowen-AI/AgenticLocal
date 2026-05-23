@@ -10,6 +10,7 @@ from .model_selection import (
     provider_registry,
     render_model_selection,
 )
+from .ollama_runtime import ensure_ollama_model_available
 from .session import AgentSession
 
 
@@ -72,6 +73,8 @@ def run_chat(argv=None) -> int:
         api_base=args.api_base,
         api_key=args.api_key,
     )
+    if args.model is not None and not ensure_ollama_model_available(current_model):
+        return 1
 
     def make_controller(model_selection: ModelSelection):
         return create_controller(
@@ -132,8 +135,11 @@ def run_chat(argv=None) -> int:
         if user_input.startswith("/model "):
             requested = user_input.split(maxsplit=1)[1].strip()
             try:
-                current_model = parse_model_command(requested, fallback=current_model)
+                requested_model = parse_model_command(requested, fallback=current_model)
+                if not ensure_ollama_model_available(requested_model):
+                    continue
                 old_history = session.history
+                current_model = requested_model
                 controller = make_controller(current_model)
                 session = AgentSession(
                     controller,
