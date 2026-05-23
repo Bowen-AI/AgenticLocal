@@ -189,13 +189,14 @@ Or switch inside an interactive chat session:
 
 ```text
 /models
-/model ollama qwen3.5:9b
+/model ollama qwen3.5:4b-mlx
 ```
 
-Interactive chat defaults to Ollama `qwen3.5:9b`. The `rule` provider is still
+Interactive chat defaults to Ollama `qwen3.5:4b-mlx`. The `rule` provider is still
 available for deterministic offline tests and demos.
-Explicit missing Ollama models selected with `--model` or `/model` prompt for a
-download before terminal entry points switch to them.
+Missing Ollama startup models selected by default or with `--model`, plus
+interactive `/model` switches, prompt for a download before terminal entry
+points use them.
 
 Served runs can choose the provider/model per request:
 

@@ -73,7 +73,7 @@ def run_chat(argv=None) -> int:
         api_base=args.api_base,
         api_key=args.api_key,
     )
-    if args.model is not None and not ensure_ollama_model_available(current_model):
+    if not ensure_ollama_model_available(current_model):
         return 1
 
     def make_controller(model_selection: ModelSelection):

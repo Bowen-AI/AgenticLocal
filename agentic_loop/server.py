@@ -615,7 +615,7 @@ def serve(argv=None) -> int:
         api_base=args.api_base,
         api_key=args.api_key,
     )
-    if args.model is not None and not ensure_ollama_model_available(default_model_selection):
+    if not ensure_ollama_model_available(default_model_selection):
         return 1
 
     app = AgentServerApp(

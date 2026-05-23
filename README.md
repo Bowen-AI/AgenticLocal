@@ -46,14 +46,14 @@ agentic-loop --version
 
 The installer creates an isolated environment under
 `~/.local/share/agentic-loop`, writes a launcher to `~/.local/bin`, prompts for
-Ollama when it is missing, and pulls the default `qwen3.5:9b` model when
+Ollama when it is missing, and pulls the default `qwen3.5:4b-mlx` model when
 Ollama is available. Use `--no-model-pull` to skip the model download.
 
 Common install modes:
 
 ```bash
 scripts/install.sh --with-ollama
-scripts/install.sh --ollama-model qwen3.5:9b
+scripts/install.sh --ollama-model qwen3.5:4b-mlx
 scripts/install.sh --no-ollama
 ```
 
@@ -65,9 +65,9 @@ Start an interactive agent chat:
 python3 -m agentic_loop chat
 ```
 
-Interactive chat defaults to Ollama with `qwen3.5:9b`; when you explicitly
-choose a missing Ollama model with `--model` or `/model`, the CLI asks whether
-to download it before continuing. Start chat with opt-in public web/news tools:
+Interactive chat defaults to Ollama with `qwen3.5:4b-mlx`; when a selected
+startup model or `/model` switch is missing, the CLI asks whether to download it
+before continuing. Start chat with opt-in public web/news tools:
 
 ```bash
 python3 -m agentic_loop chat --enable-network-tools
@@ -125,7 +125,7 @@ Start the local HTTP agent service:
 python3 -m agentic_loop serve --host 127.0.0.1 --port 8765
 ```
 
-The service defaults to Ollama with `qwen3.5:9b`, but clients can choose provider and
+The service defaults to Ollama with `qwen3.5:4b-mlx`, but clients can choose provider and
 model per request or per session. Use `--provider rule` when you want the
 dependency-free deterministic provider.
 
@@ -201,9 +201,9 @@ python3 -m agentic_loop chat --enable-network-tools
 ```
 
 Inside chat, use `/rules`, `/rule on max_effort`, `/models`,
-`/model ollama qwen3.5:9b`, `/loop`, `/search`, and `/release`.
+`/model ollama qwen3.5:4b-mlx`, `/loop`, `/search`, and `/release`.
 
-When chat starts without `--provider`, it uses `--provider ollama --model qwen3.5:9b`.
+When chat starts without `--provider`, it uses `--provider ollama --model qwen3.5:4b-mlx`.
 Use `--provider rule` for deterministic offline demos and tool-loop tests.
 Explicit Ollama model choices in chat, one-shot runs, serving, and local client
 requests prompt to download the model first when it is not already installed.
@@ -306,7 +306,7 @@ when Ollama is available:
 
 ```bash
 scripts/install.sh --with-ollama
-scripts/install.sh --ollama-model qwen3.5:9b
+scripts/install.sh --ollama-model qwen3.5:4b-mlx
 scripts/install.sh --no-model-pull
 scripts/install.sh --no-ollama
 ```

@@ -3,7 +3,7 @@ from typing import Any
 
 
 DEFAULT_INTERACTIVE_PROVIDER = "ollama"
-DEFAULT_INTERACTIVE_MODEL = "qwen3.5:9b"
+DEFAULT_INTERACTIVE_MODEL = "qwen3.5:4b-mlx"
 DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 
 

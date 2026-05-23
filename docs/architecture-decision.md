@@ -118,7 +118,7 @@ decision. Requests can send:
 
 At the model-selection interface level, external/local providers validate that
 a model name is present. The interactive chat and served CLI entrypoints add a
-friendly default, `ollama` with `qwen3.5:9b`, so first-run users can start
+friendly default, `ollama` with `qwen3.5:4b-mlx`, so first-run users can start
 chatting after the installer pulls the default model. The dependency-free
 `rule` provider remains available for deterministic tests and offline demos.
 
@@ -162,7 +162,7 @@ curl -fsSL https://raw.githubusercontent.com/Bowen-AI/AgenticLocal/main/scripts/
 ```
 
 That path installs the Python runtime, can install Ollama when missing, and
-pulls the default `qwen3.5:9b` model unless `--no-model-pull` is passed.
+pulls the default `qwen3.5:4b-mlx` model unless `--no-model-pull` is passed.
 
 The current model is deterministic for testing. That is intentional: it proves
 the runtime, policy, session, tools, memory, trace, and server behavior without

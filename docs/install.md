@@ -85,11 +85,11 @@ chat and serve unless you pass `--no-model-pull`:
 scripts/install.sh
 
 # Noninteractive local-model setup. This installs Ollama if missing and pulls
-# qwen3.5:9b by default.
+# qwen3.5:4b-mlx by default.
 scripts/install.sh --with-ollama
 
 # Choose a different model, skip the model pull, or skip Ollama entirely.
-scripts/install.sh --ollama-model qwen3.5:9b
+scripts/install.sh --ollama-model qwen3.5:4b-mlx
 scripts/install.sh --no-model-pull
 scripts/install.sh --no-ollama
 ```
@@ -203,11 +203,11 @@ Fetch https://example.com and summarize it.
 ## Ollama
 
 For local model runs, install Ollama separately and pull a tool-capable model.
-Interactive chat and serve default to Ollama with `qwen3.5:9b`; use
+Interactive chat and serve default to Ollama with `qwen3.5:4b-mlx`; use
 `--provider rule` when you want the dependency-free deterministic provider.
 
 ```bash
-ollama pull qwen3.5:9b
+ollama pull qwen3.5:4b-mlx
 python3 -m agentic_loop chat --enable-network-tools
 ```
 
@@ -289,12 +289,12 @@ Inside interactive chat:
 
 ```text
 /models
-/model ollama qwen3.5:9b
+/model ollama qwen3.5:4b-mlx
 /model openai your-openai-model
 /model provider=openai-compatible model=your-model api_base=https://provider.example/v1 api_key=...
 ```
 
-If you do not pass `--provider`, interactive chat starts with Ollama `qwen3.5:9b`.
+If you do not pass `--provider`, interactive chat starts with Ollama `qwen3.5:4b-mlx`.
 Use `--provider rule` when you want deterministic local smoke tests and tool
 demos without a model server.
 

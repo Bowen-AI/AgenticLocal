@@ -86,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/Bowen-AI/AgenticLocal/main/scripts/
   | bash -s -- --with-ollama
 ```
 
-The installer can install Ollama and pulls the default `qwen3.5:9b` model when
+The installer can install Ollama and pulls the default `qwen3.5:4b-mlx` model when
 Ollama is available. Use `--no-model-pull` or `--no-ollama` for narrower
 installs.
 
@@ -96,11 +96,11 @@ Run it as an interactive chat:
 python3 -m agentic_loop chat
 ```
 
-This starts with Ollama `qwen3.5:9b` by default. Switch models inside chat with:
+This starts with Ollama `qwen3.5:4b-mlx` by default. Switch models inside chat with:
 
 ```text
 /models
-/model ollama qwen3.5:9b
+/model ollama qwen3.5:4b-mlx
 ```
 
 Use `--provider rule` for deterministic offline tests and demos.
@@ -111,7 +111,7 @@ Run it as a local HTTP service:
 python3 -m agentic_loop serve --host 127.0.0.1 --port 8765
 ```
 
-The service defaults to Ollama with `qwen3.5:9b` and enables public web/news/fetch
+The service defaults to Ollama with `qwen3.5:4b-mlx` and enables public web/news/fetch
 tools. It does not lock the process to one model: clients can discover provider
 requirements and choose model settings per request or per session. Start with
 `--disable-network-tools` when the HTTP API should run without public network
@@ -139,7 +139,7 @@ python3 -m agentic_loop --provider ollama --model your-local-model \
 ```
 
 Note: Ollama itself does not require this project to pre-pick a model. The
-runtime exposes provider/model selection through CLI and HTTP; `qwen3.5:9b` is
+runtime exposes provider/model selection through CLI and HTTP; `qwen3.5:4b-mlx` is
 only the friendly chat/serve default. Use a model that advertises native tool
 calling when you want the model itself to request tools.
 

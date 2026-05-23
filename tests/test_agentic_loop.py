@@ -587,7 +587,10 @@ class AgenticLoopTest(unittest.TestCase):
         with redirect_stdout(StringIO()), patch(
             "agentic_loop.server.AgentServerApp",
             side_effect=fake_app,
-        ), patch("agentic_loop.server.ThreadingHTTPServer", FakeServer):
+        ), patch("agentic_loop.server.ThreadingHTTPServer", FakeServer), patch(
+            "agentic_loop.server.ensure_ollama_model_available",
+            return_value=True,
+        ):
             exit_code = serve_command(["--port", "0"])
 
         self.assertEqual(exit_code, 0)
@@ -611,7 +614,10 @@ class AgenticLoopTest(unittest.TestCase):
         with redirect_stdout(StringIO()), patch(
             "agentic_loop.server.AgentServerApp",
             side_effect=fake_app,
-        ), patch("agentic_loop.server.ThreadingHTTPServer", FakeServer):
+        ), patch("agentic_loop.server.ThreadingHTTPServer", FakeServer), patch(
+            "agentic_loop.server.ensure_ollama_model_available",
+            return_value=True,
+        ):
             exit_code = serve_command(["--port", "0", "--disable-network-tools"])
 
         self.assertEqual(exit_code, 0)
@@ -664,7 +670,7 @@ class AgenticLoopTest(unittest.TestCase):
             selection,
             prompt_fn=lambda prompt: "yes",
             print_fn=lines.append,
-            list_models_fn=lambda host: {"qwen3.5:9b"},
+            list_models_fn=lambda host: {"qwen3.5:4b-mlx"},
             pull_model_fn=lambda model, host, print_fn: pulled.append((model, host)),
         )
 
@@ -686,6 +692,21 @@ class AgenticLoopTest(unittest.TestCase):
         with patch("agentic_loop.client.ensure_ollama_model_available", return_value=False) as ensure:
             exit_code = cli_main(
                 ["client", "--provider", "ollama", "--model", "missing-model", "hello"]
+            )
+
+        self.assertEqual(exit_code, 1)
+        ensure.assert_called_once()
+
+    def test_chat_prompts_for_default_missing_ollama_model_before_start(self):
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "agentic_loop.chat.ensure_ollama_model_available",
+            return_value=False,
+        ) as ensure:
+            exit_code = run_chat(
+                [
+                    "--db",
+                    str(Path(tmp) / "agentic.db"),
+                ],
             )
 
         self.assertEqual(exit_code, 1)
@@ -716,7 +737,7 @@ class AgenticLoopTest(unittest.TestCase):
                 side_effect=["/model ollama missing-model", "/model", "/exit"],
             ), patch(
                 "agentic_loop.chat.ensure_ollama_model_available",
-                return_value=False,
+                side_effect=lambda selection: selection.provider != "ollama",
             ) as ensure:
                 exit_code = run_chat(
                     [
@@ -728,9 +749,19 @@ class AgenticLoopTest(unittest.TestCase):
                 )
             text = output.getvalue()
 
-            self.assertEqual(exit_code, 0)
-            ensure.assert_called_once()
-            self.assertIn("model: rule (none)", text)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual([call.args[0].provider for call in ensure.call_args_list], ["rule", "ollama"])
+        self.assertIn("model: rule (none)", text)
+
+    def test_serve_prompts_for_default_missing_ollama_model_before_start(self):
+        with patch(
+            "agentic_loop.server.ensure_ollama_model_available",
+            return_value=False,
+        ) as ensure:
+            exit_code = serve_command(["--port", "0"])
+
+        self.assertEqual(exit_code, 1)
+        ensure.assert_called_once()
 
     def test_serve_prompts_for_explicit_missing_ollama_model_before_start(self):
         with patch(
