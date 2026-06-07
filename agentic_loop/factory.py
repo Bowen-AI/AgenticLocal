@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from .context import ContextBuilder
 from .controller import AgentController
 from .logs import CompositeTraceLogger, JsonlTraceLogger, SQLiteTraceLogger
 from .memory import JsonlMemory
@@ -42,6 +43,7 @@ def create_controller(
     workflow_key: str | None = None,
     learning_mode: str = "draft",
     learning_threshold: int = 2,
+    system_prompt: str | None = None,
 ) -> AgentController:
     workspace_path = Path(workspace)
     registry = tools or create_default_tools(enable_network=enable_network_tools)
@@ -108,6 +110,7 @@ def create_controller(
 
     return AgentController(
         model=selected_model,
+        context_builder=ContextBuilder(system_prompt=system_prompt) if system_prompt else None,
         tools=registry,
         policy=WorkspacePolicy(
             workspace_path,

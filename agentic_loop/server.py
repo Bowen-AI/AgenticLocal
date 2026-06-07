@@ -75,6 +75,7 @@ class AgentServerApp:
         voice_token_client: GeminiLiveTokenClient | None = None,
         learning_mode: str = "draft",
         learning_threshold: int = 2,
+        system_prompt: str | None = None,
     ):
         if voice_provider not in VOICE_PROVIDERS:
             allowed = ", ".join(sorted(VOICE_PROVIDERS))
@@ -102,6 +103,7 @@ class AgentServerApp:
         self.voice_model = voice_model or DEFAULT_GEMINI_LIVE_MODEL
         self.learning_mode = learning_mode
         self.learning_threshold = learning_threshold
+        self.system_prompt = system_prompt
         self.gemini_api_key = (
             gemini_api_key
             or os.environ.get("GEMINI_API_KEY")
@@ -183,6 +185,7 @@ class AgentServerApp:
             tools=self._create_tools(),
             learning_mode=self.learning_mode,
             learning_threshold=self.learning_threshold,
+            system_prompt=self.system_prompt,
         )
 
     def _make_session(
