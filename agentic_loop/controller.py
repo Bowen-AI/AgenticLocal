@@ -78,6 +78,7 @@ class AgentController:
         enabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         workflow_key: str | None = None,
+        cancel_event=None,
     ) -> AgentResult:
         run_id = run_id or uuid.uuid4().hex
         state = AgentState(goal=goal)
@@ -134,6 +135,18 @@ class AgentController:
         )
 
         for index in range(1, run_max_steps + 1):
+            # Cooperative cancellation (e.g. voice barge-in): stop at the step
+            # boundary so no further model calls or tools fire on an abandoned turn.
+            if cancel_event is not None and cancel_event.is_set():
+                state.final_answer = "(interrupted)"
+                state.add_step(AgentStep(index=index, action="cancelled"))
+                self.logger.log("cancelled", {"step_index": index},
+                                session_id=session_id, run_id=run_id)
+                return self._result(
+                    state=state, final_answer="(interrupted)", run_id=run_id,
+                    session_id=session_id, workflow_key=workflow.key if workflow else None,
+                    active_rule_keys=active_rule_keys_for_learning, matched_skills=matched_skills,
+                )
             active_rules = self.rule_resolver.active_rules(
                 session_id=session_id,
                 run_id=run_id,
@@ -294,6 +307,18 @@ class AgentController:
                     matched_skills=matched_skills,
                 )
 
+            # Don't fire a (possibly side-effecting) tool if we were cancelled
+            # while the model was producing this call.
+            if cancel_event is not None and cancel_event.is_set():
+                state.final_answer = "(interrupted)"
+                state.add_step(AgentStep(index=index, action="cancelled", tool_name=call.name))
+                self.logger.log("cancelled", {"step_index": index, "tool": call.name},
+                                session_id=session_id, run_id=run_id)
+                return self._result(
+                    state=state, final_answer="(interrupted)", run_id=run_id,
+                    session_id=session_id, workflow_key=workflow.key if workflow else None,
+                    active_rule_keys=active_rule_keys_for_learning, matched_skills=matched_skills,
+                )
             try:
                 result = self.tools.run(call.name, tool_context, call.arguments)
                 serialized = serialize_tool_result(result)

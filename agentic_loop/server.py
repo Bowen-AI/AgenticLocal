@@ -227,6 +227,7 @@ class AgentServerApp:
         disabled_rule_keys: list[str] | None = None,
         workflow_key: str | None = None,
         model_selection: ModelSelection | None = None,
+        cancel_event=None,
     ) -> dict[str, Any]:
         session_id, session = self.get_session(session_id, model_selection)
         selected_model = self.session_model_selections.get(session_id, self.default_model_selection)
@@ -235,6 +236,7 @@ class AgentServerApp:
             enabled_rule_keys=enabled_rule_keys,
             disabled_rule_keys=disabled_rule_keys,
             workflow_key=workflow_key or self.session_workflows.get(session_id),
+            cancel_event=cancel_event,
         )
         payload = serialize_result(result, selected_model)
         payload["session_id"] = session_id

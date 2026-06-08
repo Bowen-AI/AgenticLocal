@@ -18,6 +18,7 @@ class AgentSession:
         enabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         workflow_key: str | None = None,
+        cancel_event=None,
     ) -> AgentResult:
         result = self.controller.run(
             user_message,
@@ -26,6 +27,7 @@ class AgentSession:
             enabled_rule_keys=enabled_rule_keys,
             disabled_rule_keys=disabled_rule_keys,
             workflow_key=workflow_key,
+            cancel_event=cancel_event,
         )
         user = Message(role="user", content=user_message)
         assistant = Message(role="assistant", content=result.final_answer)

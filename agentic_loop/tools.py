@@ -1,6 +1,8 @@
 import csv
+import ipaddress
 import json
 import re
+import socket
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -10,6 +12,41 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .memory import MemoryStore
+
+
+class UnsafeUrlError(ValueError):
+    """A web request was rejected (bad scheme or a non-public/SSRF target)."""
+
+
+def _ip_is_public(ip: str) -> bool:
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return not (a.is_loopback or a.is_private or a.is_link_local
+                or a.is_reserved or a.is_multicast or a.is_unspecified)
+
+
+def require_public_http_url(url: str) -> str:
+    """SSRF guard: allow only http(s) URLs whose host resolves to PUBLIC IPs.
+    Blocks loopback (the bundled Ollama / the agent's own API), link-local cloud
+    metadata (169.254.169.254), and private LAN services."""
+    parsed = urllib.parse.urlparse((url or "").strip())
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise UnsafeUrlError(f"unsupported URL scheme: {parsed.scheme!r}")
+    host = parsed.hostname or ""
+    try:
+        ipaddress.ip_address(host)
+        ok = _ip_is_public(host)
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(host, None)
+        except Exception as exc:  # noqa: BLE001
+            raise UnsafeUrlError(f"could not resolve host {host!r}: {exc}") from exc
+        ok = bool(infos) and all(_ip_is_public(i[4][0]) for i in infos)
+    if not ok:
+        raise UnsafeUrlError(f"refusing a non-public host: {host!r}")
+    return url
 
 
 class WebClient(Protocol):
@@ -26,6 +63,7 @@ class UrllibWebClient:
         return json.loads(text)
 
     def get_text(self, url: str, timeout_s: float = 10.0) -> str:
+        require_public_http_url(url)  # SSRF guard before any network call
         request = urllib.request.Request(
             url,
             headers={"User-Agent": "agentic-loop/0.1"},
