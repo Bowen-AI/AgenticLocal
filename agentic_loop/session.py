@@ -18,6 +18,10 @@ class AgentSession:
         enabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         workflow_key: str | None = None,
+        cancel_event=None,
+        on_event=None,
+        max_steps: int | None = None,
+        approval_callback=None,
     ) -> AgentResult:
         result = self.controller.run(
             user_message,
@@ -26,6 +30,10 @@ class AgentSession:
             enabled_rule_keys=enabled_rule_keys,
             disabled_rule_keys=disabled_rule_keys,
             workflow_key=workflow_key,
+            cancel_event=cancel_event,
+            on_event=on_event,
+            max_steps=max_steps,
+            approval_callback=approval_callback,
         )
         user = Message(role="user", content=user_message)
         assistant = Message(role="assistant", content=result.final_answer)

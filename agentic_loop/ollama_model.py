@@ -3,11 +3,15 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .types import Message, ModelResponse
+from .types import Message, ModelResponse, ToolCall
 
 
 class OllamaError(RuntimeError):
     pass
+
+
+class ToolsUnsupportedError(OllamaError):
+    """Raised when the selected model cannot use tools and silent degrade is off."""
 
 
 class OllamaChatModel:
@@ -18,12 +22,15 @@ class OllamaChatModel:
         timeout_s: float = 120.0,
         use_tools: bool = True,
         think: bool | str | None = False,
+        # When tools are required, refuse to silently retry without them.
+        require_tools: bool = True,
     ):
         self.model = model
         self.host = host.rstrip("/")
         self.timeout_s = timeout_s
         self.use_tools = use_tools
         self.think = think
+        self.require_tools = require_tools
 
     def respond(
         self,
@@ -43,27 +50,34 @@ class OllamaChatModel:
 
         data = self._post("/api/chat", payload)
         if data.get("_retried_without_tools"):
-            message = data.get("message") or {}
-            content = (message.get("content") or data.get("response") or "").strip()
-            suffix = (
-                "\n\nNote: this Ollama model does not support native tool calling, "
-                "so the runtime could not expose tools to it."
+            msg = (
+                f"Model {self.model!r} does not support native tool calling. "
+                "Pick a tool-capable Ollama model (e.g. qwen3, llama3.1, mistral) "
+                "or the agent cannot use tools."
             )
-            return ModelResponse.final((content or "Ollama returned an empty response.") + suffix)
+            if self.require_tools and tools:
+                raise ToolsUnsupportedError(msg)
+            return ModelResponse.final(msg, tools_unsupported=True)
 
         message = data.get("message") or {}
         tool_calls = message.get("tool_calls") or []
         if tool_calls:
-            call = tool_calls[0]
-            function = call.get("function") or {}
-            name = function.get("name")
-            if not name:
-                return ModelResponse.final("Ollama returned a tool call without a function name.")
-            return ModelResponse.call(
-                name,
-                self._arguments(function.get("arguments", {})),
-                call.get("id") or f"ollama_{name}",
-            )
+            parsed: list[ToolCall] = []
+            for i, call in enumerate(tool_calls):
+                function = call.get("function") or {}
+                name = function.get("name")
+                if not name:
+                    continue
+                parsed.append(
+                    ToolCall(
+                        name=name,
+                        arguments=self._arguments(function.get("arguments", {})),
+                        id=call.get("id") or f"ollama_{name}_{i}",
+                    )
+                )
+            if not parsed:
+                return ModelResponse.final("Ollama returned tool calls without function names.")
+            return ModelResponse.calls(parsed)
 
         content = message.get("content") or data.get("response") or ""
         return ModelResponse.final(content.strip() or "Ollama returned an empty response.")

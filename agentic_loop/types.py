@@ -32,14 +32,32 @@ class ToolCall:
 class ModelResponse:
     final_answer: str | None = None
     tool_call: ToolCall | None = None
+    tool_calls: tuple[ToolCall, ...] = ()
+    # True when the provider rejected tools and we refused to silently degrade.
+    tools_unsupported: bool = False
+
+    def __post_init__(self) -> None:
+        # Keep tool_call as the first call for backward-compatible callers.
+        if self.tool_calls and self.tool_call is None:
+            object.__setattr__(self, "tool_call", self.tool_calls[0])
+        elif self.tool_call is not None and not self.tool_calls:
+            object.__setattr__(self, "tool_calls", (self.tool_call,))
 
     @classmethod
-    def final(cls, content: str) -> "ModelResponse":
-        return cls(final_answer=content)
+    def final(cls, content: str, *, tools_unsupported: bool = False) -> "ModelResponse":
+        return cls(final_answer=content, tools_unsupported=tools_unsupported)
 
     @classmethod
     def call(cls, name: str, arguments: dict[str, Any], call_id: str) -> "ModelResponse":
-        return cls(tool_call=ToolCall(name=name, arguments=arguments, id=call_id))
+        tc = ToolCall(name=name, arguments=arguments, id=call_id)
+        return cls(tool_call=tc, tool_calls=(tc,))
+
+    @classmethod
+    def calls(cls, tool_calls: list[ToolCall] | tuple[ToolCall, ...]) -> "ModelResponse":
+        calls = tuple(tool_calls)
+        if not calls:
+            return cls.final("Model returned an empty tool-call list.")
+        return cls(tool_call=calls[0], tool_calls=calls)
 
 
 @dataclass

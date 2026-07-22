@@ -289,6 +289,9 @@ python3 -m unittest discover -s tests -v
 Current coverage checks:
 
 - loop/controller execution
+- multi-tool responses (all `tool_calls` executed in one step)
+- blocking `approval_callback` for risky writes when callers supply one
+- native `on_event` / `max_steps` passthrough on `AgentController.run` and chat
 - repeated identical tool-call loop guard
 - tool calls
 - opt-in public web/news/fetch tools
@@ -308,7 +311,7 @@ Current coverage checks:
 - provider adapter selection
 - voice adapter interface
 - learning loop storage, review commands, and skill reuse
-- Ollama adapter parsing/fallback behavior
+- Ollama adapter parsing/fallback behavior (including tools-unsupported)
 
 ## Package
 
@@ -446,13 +449,15 @@ Agent Runtime
        - Rule model
        - Ollama
        - OpenAI-compatible
+       - optional MLX (`mlx-lm`) local engine
        - Gemini/OpenAI-compatible endpoints
        - LocalAI
        - other provider API keys through the adapter boundary
-  -> Policy / Approval Engine
+  -> Policy / Resolution Engine
        - configured read roots
        - configured write roots
        - approval-required roots
+       - optional blocking approval callback for risky tools
        - active rule checks
        - symlink/path escape checks
   -> Tool Registry
@@ -460,12 +465,13 @@ Agent Runtime
        - CSV inspection
        - memory tools
        - opt-in web/news/fetch tools
+       - multi-tool parallel calls from one model response
        - future paper, dataset, MCP tools
   -> Learning Loop
        - observe completed run summaries
        - reflect into structured draft artifacts
        - reuse approved procedural skills by trigger matching
-  -> Event Logger
+  -> Event Logger (SQLite + optional in-process `on_event` callback)
   -> Evaluator
 
 Storage

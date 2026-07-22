@@ -75,6 +75,7 @@ class AgentServerApp:
         voice_token_client: GeminiLiveTokenClient | None = None,
         learning_mode: str = "draft",
         learning_threshold: int = 2,
+        system_prompt: str | None = None,
     ):
         if voice_provider not in VOICE_PROVIDERS:
             allowed = ", ".join(sorted(VOICE_PROVIDERS))
@@ -102,6 +103,7 @@ class AgentServerApp:
         self.voice_model = voice_model or DEFAULT_GEMINI_LIVE_MODEL
         self.learning_mode = learning_mode
         self.learning_threshold = learning_threshold
+        self.system_prompt = system_prompt
         self.gemini_api_key = (
             gemini_api_key
             or os.environ.get("GEMINI_API_KEY")
@@ -183,6 +185,7 @@ class AgentServerApp:
             tools=self._create_tools(),
             learning_mode=self.learning_mode,
             learning_threshold=self.learning_threshold,
+            system_prompt=self.system_prompt,
         )
 
     def _make_session(
@@ -224,6 +227,10 @@ class AgentServerApp:
         disabled_rule_keys: list[str] | None = None,
         workflow_key: str | None = None,
         model_selection: ModelSelection | None = None,
+        cancel_event=None,
+        on_event=None,
+        max_steps: int | None = None,
+        approval_callback=None,
     ) -> dict[str, Any]:
         session_id, session = self.get_session(session_id, model_selection)
         selected_model = self.session_model_selections.get(session_id, self.default_model_selection)
@@ -232,6 +239,10 @@ class AgentServerApp:
             enabled_rule_keys=enabled_rule_keys,
             disabled_rule_keys=disabled_rule_keys,
             workflow_key=workflow_key or self.session_workflows.get(session_id),
+            cancel_event=cancel_event,
+            on_event=on_event,
+            max_steps=max_steps,
+            approval_callback=approval_callback,
         )
         payload = serialize_result(result, selected_model)
         payload["session_id"] = session_id

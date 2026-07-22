@@ -437,9 +437,16 @@ class AgenticLoopTest(unittest.TestCase):
                     return data
                 return {"message": {"role": "assistant", "content": "OK"}}
 
-        response = FakeOllama(model="test-model").respond([], create_default_tools().schemas(), "")
-        self.assertIn("OK", response.final_answer)
+        # require_tools=False keeps a soft final_answer (loud text, no raise).
+        response = FakeOllama(model="test-model", require_tools=False).respond(
+            [], create_default_tools().schemas(), ""
+        )
         self.assertIn("does not support native tool calling", response.final_answer)
+        self.assertTrue(response.tools_unsupported)
+
+        with self.assertRaises(Exception) as raised:
+            FakeOllama(model="test-model").respond([], create_default_tools().schemas(), "")
+        self.assertIn("does not support native tool calling", str(raised.exception))
 
     def test_server_app_chat_session(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -569,6 +576,59 @@ class AgenticLoopTest(unittest.TestCase):
 
             self.assertEqual(result.state.steps[0].action, "approval_required")
             self.assertFalse((workspace / "outputs" / "note.txt").exists())
+
+    def test_blocking_approval_callback_allows_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "outputs").mkdir()
+            model = ScriptedModel(
+                [
+                    ModelResponse.call(
+                        "write_file",
+                        {"path": "outputs/note.txt", "content": "approved"},
+                        "call_write",
+                    ),
+                    ModelResponse.final("wrote it"),
+                ]
+            )
+            seen = []
+
+            def approve(call, decision):
+                seen.append((call.name, decision.requires_approval))
+                return True
+
+            result = self.make_controller(model=model, workspace=workspace).run(
+                "Write a note.",
+                enabled_rule_keys={"safe_writes"},
+                approval_callback=approve,
+            )
+            self.assertEqual(seen, [("write_file", True)])
+            self.assertTrue((workspace / "outputs" / "note.txt").exists())
+            self.assertEqual(result.final_answer, "wrote it")
+
+    def test_multi_tool_response_executes_all_calls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "a.txt").write_text("A", encoding="utf-8")
+            (workspace / "b.txt").write_text("B", encoding="utf-8")
+            from agentic_loop.types import ToolCall
+
+            model = ScriptedModel(
+                [
+                    ModelResponse.calls(
+                        [
+                            ToolCall("read_file", {"path": "a.txt"}, "c1"),
+                            ToolCall("read_file", {"path": "b.txt"}, "c2"),
+                        ]
+                    ),
+                    ModelResponse.final("read both"),
+                ]
+            )
+            result = self.make_controller(model=model, workspace=workspace).run("Read both files.")
+            tool_steps = [s for s in result.state.steps if s.action == "tool_call"]
+            self.assertEqual(len(tool_steps), 2)
+            self.assertEqual({s.arguments.get("path") for s in tool_steps}, {"a.txt", "b.txt"})
+            self.assertEqual(result.final_answer, "read both")
 
     def test_search_workflow_requires_network_tools(self):
         result = self.make_controller().run("Search the internet for agentic AI.", workflow_key="search")
