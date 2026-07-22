@@ -228,6 +228,9 @@ class AgentServerApp:
         workflow_key: str | None = None,
         model_selection: ModelSelection | None = None,
         cancel_event=None,
+        on_event=None,
+        max_steps: int | None = None,
+        approval_callback=None,
     ) -> dict[str, Any]:
         session_id, session = self.get_session(session_id, model_selection)
         selected_model = self.session_model_selections.get(session_id, self.default_model_selection)
@@ -237,6 +240,9 @@ class AgentServerApp:
             disabled_rule_keys=disabled_rule_keys,
             workflow_key=workflow_key or self.session_workflows.get(session_id),
             cancel_event=cancel_event,
+            on_event=on_event,
+            max_steps=max_steps,
+            approval_callback=approval_callback,
         )
         payload = serialize_result(result, selected_model)
         payload["session_id"] = session_id

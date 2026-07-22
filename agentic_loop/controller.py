@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from .context import ContextBuilder
 from .evals import BasicEvaluator
@@ -12,13 +12,13 @@ from .learning import (
     record_skill_use_results,
     relevant_skills,
 )
-from .logs import JsonlTraceLogger
+from .logs import CallbackTraceLogger, CompositeTraceLogger, JsonlTraceLogger
 from .memory import MemoryStore
 from .model import AgentModel
 from .policy import WorkspacePolicy
 from .rules import RuleResolver, WorkflowDefinition
 from .tools import ToolContext, ToolRegistry, WebClient, serialize_tool_result
-from .types import AgentState, AgentStep, Message
+from .types import AgentState, AgentStep, Message, PolicyDecision, ToolCall
 
 
 @dataclass
@@ -68,6 +68,8 @@ class AgentController:
         self.tool_context = tool_context
         self.learning_mode = normalize_learning_mode(learning_mode)
         self.learning_threshold = learning_threshold
+        # Optional blocking approval: callable(tool_call, decision) -> bool.
+        self.approval_callback: Callable[[ToolCall, PolicyDecision], bool] | None = None
 
     def run(
         self,
@@ -79,9 +81,50 @@ class AgentController:
         disabled_rule_keys: list[str] | tuple[str, ...] | set[str] | None = None,
         workflow_key: str | None = None,
         cancel_event=None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+        max_steps: int | None = None,
+        approval_callback: Callable[[ToolCall, PolicyDecision], bool] | None = None,
     ) -> AgentResult:
         run_id = run_id or uuid.uuid4().hex
         state = AgentState(goal=goal)
+        # Layer an in-process callback logger for the duration of this run so
+        # voice/chat can stream without polling SQLite.
+        base_logger = self.logger
+        if on_event is not None:
+            self.logger = CompositeTraceLogger(base_logger, CallbackTraceLogger(on_event))
+        run_approval = approval_callback if approval_callback is not None else self.approval_callback
+        try:
+            return self._run_inner(
+                goal=goal,
+                state=state,
+                prior_messages=prior_messages,
+                session_id=session_id,
+                run_id=run_id,
+                enabled_rule_keys=enabled_rule_keys,
+                disabled_rule_keys=disabled_rule_keys,
+                workflow_key=workflow_key,
+                cancel_event=cancel_event,
+                max_steps=max_steps,
+                approval_callback=run_approval,
+            )
+        finally:
+            self.logger = base_logger
+
+    def _run_inner(
+        self,
+        *,
+        goal: str,
+        state: AgentState,
+        prior_messages: list[Message] | None,
+        session_id: str | None,
+        run_id: str,
+        enabled_rule_keys,
+        disabled_rule_keys,
+        workflow_key: str | None,
+        cancel_event,
+        max_steps: int | None,
+        approval_callback,
+    ) -> AgentResult:
         run_enabled_rules = set(self.enabled_rule_keys)
         run_enabled_rules.update(enabled_rule_keys or ())
         run_disabled_rules = set(self.disabled_rule_keys)
@@ -119,7 +162,12 @@ class AgentController:
             workflow_prompt=workflow.prompt_prefix if workflow else None,
         )
         tool_context = self._tool_context()
-        run_max_steps = workflow.max_steps_override if workflow and workflow.max_steps_override else self.max_steps
+        if max_steps is not None:
+            run_max_steps = max_steps
+        elif workflow and workflow.max_steps_override:
+            run_max_steps = workflow.max_steps_override
+        else:
+            run_max_steps = self.max_steps
         matched_skills = self._matched_learning_skills(goal)
         active_rule_keys_for_learning: list[str] = []
 
@@ -174,13 +222,77 @@ class AgentController:
                 session_id=session_id,
                 run_id=run_id,
             )
-            response = self.model.respond(
-                model_messages,
-                tools=self.tools.schemas(),
-                state_summary=state.summary(),
-            )
+            try:
+                response = self.model.respond(
+                    model_messages,
+                    tools=self.tools.schemas(),
+                    state_summary=state.summary(),
+                )
+            except Exception as exc:
+                # Loud failure when a provider refuses tools (e.g. ToolsUnsupportedError).
+                if type(exc).__name__ == "ToolsUnsupportedError" or getattr(
+                    exc, "tools_unsupported", False
+                ):
+                    msg = str(exc) or "This model does not support tool calling."
+                    state.final_answer = msg
+                    state.add_step(
+                        AgentStep(index=index, action="tools_unsupported", error=msg)
+                    )
+                    self.logger.log(
+                        "tools_unsupported",
+                        {"content": msg},
+                        session_id=session_id,
+                        run_id=run_id,
+                    )
+                    self.logger.log(
+                        "final_answer",
+                        {"content": msg},
+                        session_id=session_id,
+                        run_id=run_id,
+                    )
+                    return self._result(
+                        state=state,
+                        final_answer=msg,
+                        run_id=run_id,
+                        session_id=session_id,
+                        workflow_key=workflow.key if workflow else None,
+                        active_rule_keys=active_rule_keys_for_learning,
+                        matched_skills=matched_skills,
+                    )
+                raise
 
-            if response.final_answer is not None:
+            if response.tools_unsupported:
+                msg = (
+                    response.final_answer
+                    or "This model does not support tool calling."
+                )
+                state.final_answer = msg
+                state.add_step(
+                    AgentStep(index=index, action="tools_unsupported", error=msg)
+                )
+                self.logger.log(
+                    "tools_unsupported",
+                    {"content": msg},
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+                self.logger.log(
+                    "final_answer",
+                    {"content": msg},
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+                return self._result(
+                    state=state,
+                    final_answer=msg,
+                    run_id=run_id,
+                    session_id=session_id,
+                    workflow_key=workflow.key if workflow else None,
+                    active_rule_keys=active_rule_keys_for_learning,
+                    matched_skills=matched_skills,
+                )
+
+            if response.final_answer is not None and not response.tool_calls:
                 state.final_answer = response.final_answer
                 state.add_step(AgentStep(index=index, action="final_answer"))
                 self.logger.log(
@@ -199,181 +311,39 @@ class AgentController:
                     matched_skills=matched_skills,
                 )
 
-            if response.tool_call is None:
+            pending_calls = list(response.tool_calls) or (
+                [response.tool_call] if response.tool_call is not None else []
+            )
+            if not pending_calls:
                 state.final_answer = "Model returned neither a tool call nor a final answer."
                 state.add_step(
                     AgentStep(index=index, action="invalid_model_response", error=state.final_answer)
                 )
                 break
 
-            call = response.tool_call
-            active_rules = self.rule_resolver.active_rules(
-                session_id=session_id,
-                run_id=run_id,
-                enabled_rule_keys=run_enabled_rules,
-                disabled_rule_keys=run_disabled_rules,
-                workflow=workflow,
-            )
-            decision = self.policy.check(call)
-            if decision.allowed:
-                decision = self.rule_resolver.policy_decision(call, active_rules)
-            self.logger.log(
-                "tool_requested",
-                {
-                    "tool": call.name,
-                    "arguments": call.arguments,
-                    "allowed": decision.allowed,
-                    "reason": decision.reason,
-                    "requires_approval": decision.requires_approval,
-                    "active_rules": [rule.key for rule in active_rules],
-                },
-                session_id=session_id,
-                run_id=run_id,
-            )
-
-            if not decision.allowed:
-                denial = f"Tool call denied by policy: {decision.reason}"
-                action = "approval_required" if decision.requires_approval else "tool_denied"
-                state.add_step(
-                    AgentStep(
-                        index=index,
-                        action=action,
-                        tool_name=call.name,
-                        arguments=call.arguments,
-                        observation=denial,
-                        allowed=False,
-                    )
-                )
-                if decision.requires_approval:
-                    self.logger.log(
-                        "approval_required",
-                        {"tool": call.name, "arguments": call.arguments, "reason": decision.reason},
-                        session_id=session_id,
-                        run_id=run_id,
-                    )
-                self._log_state_delta(state, session_id, run_id)
-                messages.append(Message(role="assistant", content=f"Tool call requested: {call.name}"))
-                messages.append(
-                    Message(
-                        role="tool",
-                        name=call.name,
-                        tool_call_id=call.id,
-                        content=denial,
-                    )
-                )
-                continue
-
-            repeated_step = self._find_successful_repeated_tool_step(
-                state,
-                call.name,
-                call.arguments,
-            )
-            if repeated_step is not None:
-                final_answer = self._final_from_tool_result(call.name, repeated_step.observation)
-                state.final_answer = final_answer
-                state.add_step(
-                    AgentStep(
-                        index=index,
-                        action="repeated_tool_finalized",
-                        tool_name=call.name,
-                        arguments=call.arguments,
-                        observation=repeated_step.observation,
-                    )
-                )
-                self.logger.log(
-                    "tool_repeated",
-                    {
-                        "tool": call.name,
-                        "arguments": call.arguments,
-                        "previous_step_index": repeated_step.index,
-                    },
-                    session_id=session_id,
-                    run_id=run_id,
-                )
-                self._log_state_delta(state, session_id, run_id)
-                self.logger.log(
-                    "final_answer",
-                    {"content": final_answer},
-                    session_id=session_id,
-                    run_id=run_id,
-                )
-                return self._result(
+            # Execute EVERY tool call from this model response before the next
+            # model step (parallel tool-call batches from Ollama/OpenAI/MLX).
+            early_return: AgentResult | None = None
+            for call in pending_calls:
+                early_return = self._execute_tool_call(
+                    call=call,
+                    index=index,
                     state=state,
-                    final_answer=final_answer,
-                    run_id=run_id,
+                    messages=messages,
+                    tool_context=tool_context,
                     session_id=session_id,
-                    workflow_key=workflow.key if workflow else None,
-                    active_rule_keys=active_rule_keys_for_learning,
+                    run_id=run_id,
+                    cancel_event=cancel_event,
+                    approval_callback=approval_callback,
+                    run_enabled_rules=run_enabled_rules,
+                    run_disabled_rules=run_disabled_rules,
+                    workflow=workflow,
+                    active_rule_keys_for_learning=active_rule_keys_for_learning,
                     matched_skills=matched_skills,
                 )
-
-            # Don't fire a (possibly side-effecting) tool if we were cancelled
-            # while the model was producing this call.
-            if cancel_event is not None and cancel_event.is_set():
-                state.final_answer = "(interrupted)"
-                state.add_step(AgentStep(index=index, action="cancelled", tool_name=call.name))
-                self.logger.log("cancelled", {"step_index": index, "tool": call.name},
-                                session_id=session_id, run_id=run_id)
-                return self._result(
-                    state=state, final_answer="(interrupted)", run_id=run_id,
-                    session_id=session_id, workflow_key=workflow.key if workflow else None,
-                    active_rule_keys=active_rule_keys_for_learning, matched_skills=matched_skills,
-                )
-            try:
-                result = self.tools.run(call.name, tool_context, call.arguments)
-                serialized = serialize_tool_result(result)
-                state.add_step(
-                    AgentStep(
-                        index=index,
-                        action="tool_call",
-                        tool_name=call.name,
-                        arguments=call.arguments,
-                        observation=result,
-                    )
-                )
-                self.logger.log(
-                    "tool_result",
-                    {"tool": call.name, "result": result},
-                    session_id=session_id,
-                    run_id=run_id,
-                )
-                if call.name == "remember":
-                    self.logger.log(
-                        "memory_written",
-                        {"record": result},
-                        session_id=session_id,
-                        run_id=run_id,
-                    )
-            except Exception as exc:
-                serialized = f"{type(exc).__name__}: {exc}"
-                state.add_step(
-                    AgentStep(
-                        index=index,
-                        action="tool_error",
-                        tool_name=call.name,
-                        arguments=call.arguments,
-                        allowed=True,
-                        error=serialized,
-                    )
-                )
-                self.logger.log(
-                    "tool_error",
-                    {"tool": call.name, "error": serialized},
-                    session_id=session_id,
-                    run_id=run_id,
-                )
-
-            self._log_state_delta(state, session_id, run_id)
-
-            messages.append(Message(role="assistant", content=f"Tool call requested: {call.name}"))
-            messages.append(
-                Message(
-                    role="tool",
-                    name=call.name,
-                    tool_call_id=call.id,
-                    content=serialized,
-                )
-            )
+                if early_return is not None:
+                    return early_return
+            # Continue the outer model loop with accumulated tool observations.
 
         state.final_answer = "Agent stopped because the step limit was reached."
         self.logger.log(
@@ -397,6 +367,238 @@ class AgentController:
             active_rule_keys=active_rule_keys_for_learning,
             matched_skills=matched_skills,
         )
+
+    def _execute_tool_call(
+        self,
+        *,
+        call: ToolCall,
+        index: int,
+        state: AgentState,
+        messages: list[Message],
+        tool_context: ToolContext,
+        session_id: str | None,
+        run_id: str,
+        cancel_event,
+        approval_callback,
+        run_enabled_rules,
+        run_disabled_rules,
+        workflow,
+        active_rule_keys_for_learning: list[str],
+        matched_skills: list[dict[str, Any]],
+    ) -> AgentResult | None:
+        """Run one tool call. Returns an AgentResult to stop the loop early,
+        or None to continue with remaining calls / the next model step."""
+        active_rules = self.rule_resolver.active_rules(
+            session_id=session_id,
+            run_id=run_id,
+            enabled_rule_keys=run_enabled_rules,
+            disabled_rule_keys=run_disabled_rules,
+            workflow=workflow,
+        )
+        decision = self.policy.check(call)
+        if decision.allowed:
+            decision = self.rule_resolver.policy_decision(call, active_rules)
+        self.logger.log(
+            "tool_requested",
+            {
+                "tool": call.name,
+                "arguments": call.arguments,
+                "allowed": decision.allowed,
+                "reason": decision.reason,
+                "requires_approval": decision.requires_approval,
+                "active_rules": [rule.key for rule in active_rules],
+            },
+            session_id=session_id,
+            run_id=run_id,
+        )
+
+        # Blocking approval: when a callback is wired, pause until the user
+        # decides. Without a callback, keep the historic deny-and-continue path.
+        if decision.requires_approval and approval_callback is not None:
+            self.logger.log(
+                "approval_required",
+                {
+                    "tool": call.name,
+                    "arguments": call.arguments,
+                    "reason": decision.reason,
+                    "blocking": True,
+                },
+                session_id=session_id,
+                run_id=run_id,
+            )
+            try:
+                approved = bool(approval_callback(call, decision))
+            except Exception as exc:
+                approved = False
+                decision = PolicyDecision(
+                    allowed=False,
+                    reason=f"approval callback failed: {type(exc).__name__}: {exc}",
+                    requires_approval=True,
+                )
+            if approved:
+                decision = PolicyDecision(allowed=True, reason="approved by user")
+            else:
+                decision = PolicyDecision(
+                    allowed=False,
+                    reason=decision.reason or "denied by user",
+                    requires_approval=True,
+                )
+
+        if not decision.allowed:
+            denial = f"Tool call denied by policy: {decision.reason}"
+            action = "approval_required" if decision.requires_approval else "tool_denied"
+            state.add_step(
+                AgentStep(
+                    index=index,
+                    action=action,
+                    tool_name=call.name,
+                    arguments=call.arguments,
+                    observation=denial,
+                    allowed=False,
+                )
+            )
+            if decision.requires_approval and approval_callback is None:
+                self.logger.log(
+                    "approval_required",
+                    {
+                        "tool": call.name,
+                        "arguments": call.arguments,
+                        "reason": decision.reason,
+                    },
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+            self._log_state_delta(state, session_id, run_id)
+            messages.append(Message(role="assistant", content=f"Tool call requested: {call.name}"))
+            messages.append(
+                Message(
+                    role="tool",
+                    name=call.name,
+                    tool_call_id=call.id,
+                    content=denial,
+                )
+            )
+            return None
+
+        repeated_step = self._find_successful_repeated_tool_step(
+            state,
+            call.name,
+            call.arguments,
+        )
+        if repeated_step is not None:
+            final_answer = self._final_from_tool_result(call.name, repeated_step.observation)
+            state.final_answer = final_answer
+            state.add_step(
+                AgentStep(
+                    index=index,
+                    action="repeated_tool_finalized",
+                    tool_name=call.name,
+                    arguments=call.arguments,
+                    observation=repeated_step.observation,
+                )
+            )
+            self.logger.log(
+                "tool_repeated",
+                {
+                    "tool": call.name,
+                    "arguments": call.arguments,
+                    "previous_step_index": repeated_step.index,
+                },
+                session_id=session_id,
+                run_id=run_id,
+            )
+            self._log_state_delta(state, session_id, run_id)
+            self.logger.log(
+                "final_answer",
+                {"content": final_answer},
+                session_id=session_id,
+                run_id=run_id,
+            )
+            return self._result(
+                state=state,
+                final_answer=final_answer,
+                run_id=run_id,
+                session_id=session_id,
+                workflow_key=workflow.key if workflow else None,
+                active_rule_keys=active_rule_keys_for_learning,
+                matched_skills=matched_skills,
+            )
+
+        # Don't fire a (possibly side-effecting) tool if we were cancelled
+        # while the model was producing this call.
+        if cancel_event is not None and cancel_event.is_set():
+            state.final_answer = "(interrupted)"
+            state.add_step(AgentStep(index=index, action="cancelled", tool_name=call.name))
+            self.logger.log(
+                "cancelled",
+                {"step_index": index, "tool": call.name},
+                session_id=session_id,
+                run_id=run_id,
+            )
+            return self._result(
+                state=state,
+                final_answer="(interrupted)",
+                run_id=run_id,
+                session_id=session_id,
+                workflow_key=workflow.key if workflow else None,
+                active_rule_keys=active_rule_keys_for_learning,
+                matched_skills=matched_skills,
+            )
+        try:
+            result = self.tools.run(call.name, tool_context, call.arguments)
+            serialized = serialize_tool_result(result)
+            state.add_step(
+                AgentStep(
+                    index=index,
+                    action="tool_call",
+                    tool_name=call.name,
+                    arguments=call.arguments,
+                    observation=result,
+                )
+            )
+            self.logger.log(
+                "tool_result",
+                {"tool": call.name, "result": result},
+                session_id=session_id,
+                run_id=run_id,
+            )
+            if call.name == "remember":
+                self.logger.log(
+                    "memory_written",
+                    {"record": result},
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+        except Exception as exc:
+            serialized = f"{type(exc).__name__}: {exc}"
+            state.add_step(
+                AgentStep(
+                    index=index,
+                    action="tool_error",
+                    tool_name=call.name,
+                    arguments=call.arguments,
+                    allowed=True,
+                    error=serialized,
+                )
+            )
+            self.logger.log(
+                "tool_error",
+                {"tool": call.name, "error": serialized},
+                session_id=session_id,
+                run_id=run_id,
+            )
+
+        self._log_state_delta(state, session_id, run_id)
+        messages.append(Message(role="assistant", content=f"Tool call requested: {call.name}"))
+        messages.append(
+            Message(
+                role="tool",
+                name=call.name,
+                tool_call_id=call.id,
+                content=serialized,
+            )
+        )
+        return None
 
     def _find_successful_repeated_tool_step(
         self,

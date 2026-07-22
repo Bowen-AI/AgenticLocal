@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from ..types import Message, ModelResponse
+from ..types import Message, ModelResponse, ToolCall
 
 
 class OpenAICompatibleError(RuntimeError):
@@ -47,16 +47,22 @@ class OpenAICompatibleChatModel:
         message = choices[0].get("message") or {}
         tool_calls = message.get("tool_calls") or []
         if tool_calls:
-            call = tool_calls[0]
-            function = call.get("function") or {}
-            name = function.get("name")
-            if not name:
-                return ModelResponse.final("Provider returned a tool call without a function name.")
-            return ModelResponse.call(
-                name,
-                self._arguments(function.get("arguments", {})),
-                call.get("id") or f"openai_compatible_{name}",
-            )
+            parsed: list[ToolCall] = []
+            for i, call in enumerate(tool_calls):
+                function = call.get("function") or {}
+                name = function.get("name")
+                if not name:
+                    continue
+                parsed.append(
+                    ToolCall(
+                        name=name,
+                        arguments=self._arguments(function.get("arguments", {})),
+                        id=call.get("id") or f"openai_compatible_{name}_{i}",
+                    )
+                )
+            if not parsed:
+                return ModelResponse.final("Provider returned tool calls without function names.")
+            return ModelResponse.calls(parsed)
 
         content = message.get("content") or ""
         return ModelResponse.final(content.strip() or "Provider returned an empty response.")

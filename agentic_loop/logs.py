@@ -46,6 +46,31 @@ class SQLiteTraceLogger:
         self.storage.record_event(event_type, payload, session_id=session_id, run_id=run_id)
 
 
+class CallbackTraceLogger:
+    """In-process event hook — used by agentica-core to retire SQLite poll loops."""
+
+    def __init__(self, callback):
+        self.callback = callback
+
+    def log(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        session_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        if self.callback is None:
+            return
+        self.callback(
+            {
+                "event_type": event_type,
+                "payload": payload or {},
+                "session_id": session_id,
+                "run_id": run_id,
+            }
+        )
+
+
 class CompositeTraceLogger:
     def __init__(self, *loggers):
         self.loggers = [logger for logger in loggers if logger is not None]

@@ -91,6 +91,10 @@ def create_controller(
                 host=model_selection.api_base or "http://127.0.0.1:8080/v1",
                 api_key=model_selection.api_key,
             )
+        elif model_selection.provider in {"mlx", "mlx-lm"}:
+            from .providers.mlx_lm import MlxLmChatModel
+
+            selected_model = MlxLmChatModel(model=model_selection.model_name or "")
         else:
             raise ValueError(f"unknown provider: {model_selection.provider}")
 
